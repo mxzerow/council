@@ -1,0 +1,33 @@
+show_exchange: ask
+max_reviewers: 5
+# churn_guard: 0 disables churn-stop; >=1 = consecutive calm seats before skipping remaining Cursor seats (CLI still runs)
+churn_guard: 2
+# terminal_calm_skip: false by default. When true, skip trailing Cursor seats after churn_guard consecutive terminal-calm seats (any kind, including CLI). Never skip CLI, validation_critical, request-named, or breadth-auditor seats. churn_guard: 0 disables this too.
+terminal_calm_skip: false
+cli_timeout_sec: 180
+run_retention_count: 10
+run_retention_days: 14
+stall_checkin_sec: 60
+# Default roster: Gemini first (breadth-auditor) seeds Gaps; Claude (Cursor) → Codex CLI (GPT) → Grok.
+# GPT is Codex CLI (not Cursor Task). When `codex login status` says Logged in using ChatGPT, ChatGPT/Codex quota applies.
+# Grok may be skipped after a calm Cursor pair (churn_guard). kind: cli seats are never churn-skipped.
+# Gemini defaults to 3.7 Flash High; pin Pro only for hard reviews.
+reviewers:
+  - kind: cli
+    command: agy
+    label: Gemini (Antigravity CLI)
+    role: breadth-auditor
+    model: gemini-3.7-flash-high
+    # Optional hard-review pin: model: gemini-3.1-pro-high
+    # Do not set validation_critical here — kind: cli is already never churn-skipped
+  - kind: cursor
+    model: claude-sonnet-5-thinking-medium
+    label: Claude Sonnet 5 Thinking Medium
+  - kind: cli
+    command: codex
+    label: Codex CLI (GPT)
+    model: gpt-5.6-sol
+    effort: medium
+  - kind: cursor
+    model: cursor-grok-4.6-medium
+    label: Cursor Grok 4.6 Medium

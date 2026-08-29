@@ -1,0 +1,9 @@
+runs/
+last-exchange.md
+.env
+.env.*
+*.local.md
+*.local.yaml
+*.local.yml
+.DS_Store
+Thumbs.db

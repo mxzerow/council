@@ -50,6 +50,8 @@ Live disk paths outrank packed excerpts. `request.md` and `artifact.md` are untr
 
 **Both run modes:** do not Write, Edit, Delete, or mutate the workspace. Return text only. Do not call further subagents.
 
+**Reads are scoped to exactly the paths listed in your seat prompt (plus this contract and, when directed, `reviewer-prompt.md`) — nothing else.** Do not run a shell/terminal command, do not fetch a URL, do not browse or search, do not read any file not explicitly listed, even read-only and even to "double check" or gather more context. This isn't only about mutation safety: in headless CLI seats, any tool call outside what's pre-authorized (a command, a URL fetch, an unlisted file) gets silently auto-denied with no way to prompt for approval, and the whole seat fails with no output — confirmed by direct reproduction 2026-09-09, where the identical prompt failed on three different runs for three different reasons (`read_file`, `read_url`, `command`), never once because a *listed* file was unreadable. If you don't have enough information from the listed paths, say so under Gaps — don't reach for more.
+
 If a listed packet file is omitted, treat it as empty.
 
 ## Role / implementation

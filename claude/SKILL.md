@@ -182,8 +182,12 @@ Cache the compact envelope text **once per run** and inline it into ordinary
 `unresolved.md`. After gaps exist, point seats at `open-gaps.md` (not `gaps.md`).
 Supply **open blocking IDs** as a comma-separated header (mandatory STATUS set).
 
-Maintain **per-command-family** preflight state: `agy`/`gemini` vs `codex` fail
-independently (same rules as Cursor `SKILL.md` / shared `models.md`).
+Maintain **per-command-family** preflight state: native `agent` (`kind: cursor`)
+vs `agy`/`gemini` vs `codex` fail **independently** — a broken `agent` probe
+must not skip `agy`/`codex` seats, and vice versa (confirmed by direct
+reproduction 2026-09-09: the `agy` and `codex` recipes already isolated
+correctly; `agent` had no preflight bucket at all until this fix, so nothing
+was catching a broken `agent` flag the way `agy`'s break was caught).
 
 For each non-skipped reviewer in roster order:
 
@@ -199,9 +203,13 @@ For each non-skipped reviewer in roster order:
    - `kind: cli` + `agy`/`gemini` → Antigravity recipe in shared `models.md`
    - `kind: cli` + `codex` → Codex recipe in shared `models.md` (resolved
      launcher once; positional prompt; `-o`; tree-kill timeout)
-4. Before the first seat of a CLI family in this run, run that family's
-   preflight from `models.md`. On failure, skip remaining seats of **that**
-   family only (`cli-preflight-agy` or `cli-preflight-codex`).
+4. Before the first seat of **each** family in this run — `kind: cursor`
+   (`agent`) included, not just the two `kind: cli` families — run that
+   family's preflight (`agent`'s is in [dispatch.md](dispatch.md); `agy`/
+   `codex`'s are in `models.md`). On failure, skip remaining seats of
+   **that** family only (`cli-preflight-agent`, `cli-preflight-agy`, or
+   `cli-preflight-codex`) — a failed probe in one family must never skip
+   either of the other two.
 5. Parse the reply per [dispatch.md](dispatch.md) envelope rules (recognize
    `<<<COUNCIL_STATUS>>>` — do not drop text before Gaps when STATUS is present).
    For Codex, parse from the fresh `-o` last-message file.
@@ -234,8 +242,9 @@ Do not create a local roster or copy shared role rules into this folder.
 2. If breadth-auditor Gaps remain unaddressed after the cascade, list them under
    **Breadth audit findings** after the artifact and before Unresolved.
 3. If `unresolved.md` has non-`none` items, list them (cumulative).
-4. One line: roster actually used, including same-model skips, `cli-preflight-agy`,
-   `cli-preflight-codex`, and other failures.
+4. One line: roster actually used, including same-model skips,
+   `cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-codex`, and
+   other failures.
 5. If the full exchange was requested: append the transcript.
 
 ## Reconfigure

@@ -68,9 +68,18 @@ for this family), using the **same** flags as a real seat:
 2. Capture `agent --version`; record it in `meta.md` / argv-meta next to the
    run.
 3. Write `<run>\cli-preflight.txt` containing exactly `PREFLIGHT-OK`.
-4. Dispatch: `agent -p --mode plan --trust --workspace <skillRoot> --model
-   <first configured kind:cursor slug> --output-format json "Read
-   <run>\cli-preflight.txt and reply with exactly its contents."`
+4. Dispatch: `agent -p --mode plan --trust --workspace <skillRoot> --add-dir
+   <run> --model <first configured kind:cursor slug> --output-format json
+   "Read <run>\cli-preflight.txt and reply with exactly its contents."` —
+   **`--add-dir <run>` is required, not optional.** `--workspace <skillRoot>`
+   alone only covers the shared skill root; for the Claude sibling the run
+   folder lives under `~/.claude/skills/council/runs/...`, a **separate**
+   tree from `--workspace`'s target, so `cli-preflight.txt` (and every real
+   seat's `seat-N-prompt.md`) is unreadable without it. Confirmed by direct
+   reproduction 2026-09-09: this exact preflight failed with `read_file`
+   auto-denied until `--add-dir <run>` was added, despite `--workspace
+   <skillRoot>` already being present — the same class of gap as `agy`'s
+   `--add-dir` issue, just against a different directory pair.
 5. Success: exit 0, output parses as JSON, `.is_error` is false, `.result`
    contains `PREFLIGHT-OK`.
 6. Failure (any of: non-JSON output, non-zero exit, `.is_error` true, missing

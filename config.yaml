@@ -4,7 +4,7 @@ max_reviewers: 5
 churn_guard: 2
 # terminal_calm_skip: false by default. When true, skip trailing Cursor seats after churn_guard consecutive terminal-calm seats (any kind, including CLI). Never skip CLI, validation_critical, request-named, or breadth-auditor seats. churn_guard: 0 disables this too.
 terminal_calm_skip: false
-cli_timeout_sec: 180
+cli_timeout_sec: 600
 run_retention_count: 10
 run_retention_days: 14
 stall_checkin_sec: 60

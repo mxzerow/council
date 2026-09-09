@@ -94,10 +94,20 @@ Codex has its own preflight below — families fail independently.
 
 Keep `-p` **short**: tell `agy` to read the absolute paths in `seat-N-prompt.md` and emit the Council envelope. Do **not** put `artifact.md` on the command line (Windows argv limit ~32k).
 
-**Required `--add-dir`:**
+**Required `--add-dir` — this is not optional, and it is the #1 cause of seat
+failures when skipped (confirmed by direct reproduction 2026-09-06: reading a
+file inside a real git project without `--add-dir` on that project's root
+fails with `read_file ... auto-denied`, even though the process's own cwd
+already is that project; a scratch/non-project path does not need this at
+all — it's project-workspace trust gating specifically):**
 
 - Always: absolute skill root (`…\.cursor\skills\council`)
-- Also: each extra review root from `meta.md` / request (workspace or named project), deduped
+- **Always, not just "when present":** every review root the seat's prompt
+  points at — read `meta.md` / `request.md` for these paths **before**
+  building `$addDirs`, and add one `--add-dir` per distinct root. A seat
+  whose packet mentions a live repo path (e.g. "Live repo (review root,
+  read as needed...): D:\...") and doesn't get that path in `--add-dir`
+  will fail exactly this way, deterministically, every time.
 - Still never `--dangerously-skip-permissions`
 
 Optional config `model` / `effort`: add `--model <value>` and/or `--effort <value>` before `-p`.
@@ -118,7 +128,12 @@ $metaFile = Join-Path $run "seat-N-argv-meta.txt"
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $shortPrompt = "Read $promptFile and the absolute paths it lists. Return only the Council sentinel envelope (see inlined reviewer-envelope.md / reviewer-prompt.md). Do not write workspace files."
 $timeoutMs = 180000  # config cli_timeout_sec * 1000
-$addDirs = @($skillRoot)  # plus review_roots from meta.md
+# REQUIRED, not optional: read meta.md / request.md for every review-root path
+# this seat's prompt references (e.g. a live repo directory) and list each one
+# here. Omitting a root the prompt tells the seat to read WILL fail with
+# read_file ... auto-denied — confirmed by direct reproduction 2026-09-06.
+$reviewRoots = @()  # populate from meta.md before dispatch — do not leave empty if request.md names any path
+$addDirs = @($skillRoot) + $reviewRoots
 $argTokens = [System.Collections.Generic.List[string]]::new()
 foreach ($d in $addDirs) { $argTokens.Add('--add-dir'); $argTokens.Add($d) }
 # if config model/effort set:

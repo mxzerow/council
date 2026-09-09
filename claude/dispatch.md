@@ -11,19 +11,28 @@ $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Env
 
 Never pass secrets, `.env` contents, or credentials in any prompt to any CLI.
 
-**Source of truth for CLI argv:** `models.md` next to the shared `config.yaml`
-(see SKILL.md). This file summarizes sibling branching; do not invent a second
-conflicting recipe.
+**Source of truth for CLI argv — `agy`/Gemini and `codex`/GPT only:**
+`models.md` next to the shared `config.yaml` (see SKILL.md). Those two are
+shared with Cursor's own skill, so their recipes live in the shared file and
+this file just summarizes the branching — don't invent a second conflicting
+recipe for them here.
+
+The **native `agent` CLI (`kind: cursor` seats) recipe lives entirely in this
+file, not `models.md`, on purpose:** it's Claude-side-only. Cursor's own
+orchestrator never shells out to `agent` — it has native `Task` tool access —
+so this recipe has no reason to live in a file shared with Cursor's skill.
 
 ## CLI command-family mapping
 
 | Config `command` / label | Family | Preflight bucket | Dispatch |
 |---|---|---|---|
+| `kind: cursor`, native Cursor CLI | matches `models.md`'s family table | `agent` | Recipe below, this file |
 | `command: agy` / `gemini`, Antigravity/Gemini | `gemini` | `agy`/`gemini` | Antigravity recipe in `models.md` |
 | `command: codex`, Codex CLI / GPT CLI | `gpt` | `codex` | Codex recipe in `models.md` |
 
-Preflight failures skip **only that bucket** (`cli-preflight-agy` vs
-`cli-preflight-codex`). A failed Gemini probe must not skip Codex, and vice versa.
+Preflight failures skip **only that bucket** (`cli-preflight-agent` /
+`cli-preflight-agy` / `cli-preflight-codex`). A failed probe in one bucket must
+not skip the other two.
 
 ## `kind: cursor` seat — native Cursor `agent` CLI
 
@@ -32,6 +41,47 @@ was verified live: `agent -p --model <slug> --output-format json "<prompt>"`
 genuinely dispatches to that vendor's model (confirmed cross-vendor identity
 responses for `cursor-grok-4.6-high-fast`, `gpt-5.6-sol-medium`, and
 `claude-opus-5-thinking-high` in one test session) and returns clean JSON.
+
+**Last verified:** 2026-09-06, `agent` version `2026.09.02-c22c1a3`. Confirmed
+that day: all flags below (`-p`, `--mode`, `--trust`, `--workspace`, `--model`,
+`--output-format`) still parse and behave as documented, including reading a
+real file inside the trusted `--workspace` with no permission gap (the
+`--add-dir`-vs-project-trust issue that hit `agy` the same day does **not**
+reproduce here). This was checked specifically *because* `agy`'s flag surface
+had silently drifted (`--workspace`/`--trust` removed, `--print` calling
+convention changed) between when Council was built and that date — `agent`
+had not drifted, but nothing would have caught it early if it had, which is
+why the preflight below exists now. If `agent --version` reports anything
+other than `2026.09.02-c22c1a3` on the machine you're running from, treat this
+recipe as **unverified since that version** — the preflight will catch a
+broken flag, but re-confirm the file-read-under-`--workspace` behavior by hand
+if you have time, since a preflight only proves the probe prompt worked, not
+every documented behavior.
+
+### Preflight (`cli-preflight-agent`)
+
+Before the **first** `kind: cursor` seat in a run (and on reconfigure probe
+for this family), using the **same** flags as a real seat:
+
+1. Resolve `agent` on PATH (refresh PATH first, per the top of this file). Not
+   found → fail `agent-resolve`.
+2. Capture `agent --version`; record it in `meta.md` / argv-meta next to the
+   run.
+3. Write `<run>\cli-preflight.txt` containing exactly `PREFLIGHT-OK`.
+4. Dispatch: `agent -p --mode plan --trust --workspace <skillRoot> --model
+   <first configured kind:cursor slug> --output-format json "Read
+   <run>\cli-preflight.txt and reply with exactly its contents."`
+5. Success: exit 0, output parses as JSON, `.is_error` is false, `.result`
+   contains `PREFLIGHT-OK`.
+6. Failure (any of: non-JSON output, non-zero exit, `.is_error` true, missing
+   `PREFLIGHT-OK`, an argument-parsing error instead of a real response): skip
+   remaining `kind: cursor` seats **only** this run (`failures.md` reason
+   `cli-preflight-agent`); do not skip `agy`/`gemini` or `codex` seats. Show
+   the user the raw preflight failure text — an argument error here means the
+   flags in this file need the same kind of fix `agy`'s got, not a silent skip
+   with no explanation.
+
+### Invoke
 
 ```powershell
 $runDir  = Join-Path $skillRoot "runs\<timestamp>"   # skill root = this SKILL.md's directory
@@ -76,10 +126,24 @@ print mode with `--add-dir`; never pass `--dangerously-skip-permissions`,
 Per-command preflight: before the first `agy`/`gemini` seat, run that family's
 preflight. On failure, skip remaining `agy`/`gemini` seats only.
 
-Known local gotcha: `agy --print` can fail headlessly with a permission-gate
-error until an allow-rule is added under `permissions.allow` in agy's settings.
-Treat as CLI-seat failure — skip, log, continue. Do not add
-`--dangerously-skip-permissions`.
+Known local gotcha (confirmed by direct reproduction 2026-09-06, superseding
+an earlier wrong theory in this file): `agy --print` fails with
+`jetski: no output produced — a tool required the "read_file" permission
+that headless mode cannot prompt for it, so it was auto-denied` whenever the
+target file sits inside a **recognized project/git workspace** that wasn't
+passed via `--add-dir` — even when the process's own working directory *is*
+that project. Reading an ad hoc non-project path (e.g. a scratch temp dir)
+does not trigger this at all; it's specifically project-workspace trust
+gating, not a missing global permission. Fix: pass `--add-dir <that project
+root>` (see `models.md`'s Invoke recipe) — **not** a `~/.gemini/antigravity-cli/settings.json`
+`permissions.allow` entry (that was tried and did not reproduce or fix
+anything; do not resurrect it). Do not add `--dangerously-skip-permissions`.
+Also confirmed the same day: `--workspace` and `--trust` no longer exist on
+`agy` (`flags provided but not defined: -workspace`) and `--print` followed
+by another flag now needs the attached form `--print=<prompt>` — an older
+agy version apparently accepted the syntax this file used to document; if a
+dispatch fails with an argument-parsing error rather than a permission one,
+that's this drift, not the permission issue above.
 
 ## `kind: cli` seat — `codex` (GPT family)
 

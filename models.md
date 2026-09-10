@@ -29,7 +29,7 @@ The initial draft is always the current chat model. It is not a catalog seat. Ma
   command: agy
   label: Gemini (Antigravity CLI)
   role: breadth-auditor
-  model: gemini-3.7-flash-high   # default seat; alternate: gemini-3.1-pro-high for hard reviews
+  model: gemini-3.8-flash-high   # default seat; alternate: gemini-3.1-pro-high for hard reviews
   # effort: high                # optional: low | medium | high (often already in the model slug)
   # Do not set validation_critical — kind: cli is already never churn-skipped
 ```

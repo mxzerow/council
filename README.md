@@ -50,7 +50,7 @@ Say `/council` with a topic, point it at an existing draft, or ask for a council
 | Gemini (`command: agy`) | [Antigravity CLI](https://antigravity.google/cli) signed in with Google — **no API key** |
 | GPT (`command: codex`) | [Codex CLI](https://github.com/openai/codex) (`codex login`). ChatGPT login uses ChatGPT/Codex quota |
 
-Default roster: **Gemini (breadth-auditor) → Claude (Cursor) → Codex CLI (GPT) → Grok**. Reconfigure in chat (`/council configure`) or edit [`config.yaml`](config.yaml).
+Default roster (interleaved since 2026-09-12 — Gemini is cheap enough to run every other seat): **Gemini (breadth-auditor) → Claude (Cursor) → Gemini → Codex CLI (GPT) → Gemini → Grok → Gemini**. Reconfigure in chat (`/council configure`) or edit [`config.yaml`](config.yaml).
 
 CLI recipes in [`models.md`](models.md) are written for **PowerShell**. Cursor `Task` seats work on any OS. Gemini/Codex seats on macOS/Linux need the equivalent PATH and preflight commands.
 

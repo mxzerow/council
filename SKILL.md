@@ -50,7 +50,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 | Key | Default |
 |-----|---------|
 | `show_exchange` | `ask` |
-| `max_reviewers` | `5` |
+| `max_reviewers` | `7` (raised from `5` on 2026-09-12 to match the interleaved default roster — if this key is ever removed from `config.yaml`, falling back to `5` would silently truncate the 7-seat roster and drop Grok plus the final Gemini pass) |
 | `churn_guard` | `2` |
 | `terminal_calm_skip` | `false` |
 | `cli_timeout_sec` | `180` |
@@ -69,7 +69,7 @@ Optional per-reviewer keys:
 - CLI only: `model`, `effort` (`low` \| `medium` \| `high`) — passed through to `agy` / Codex (`-c model_reasoning_effort`) when set
 - CLI only: `command` — `agy` | `gemini` | `codex` (required for `kind: cli` unless Gemini/Antigravity by label)
 
-**Default roster intent:** Gemini first as `breadth-auditor` (copy-through Revised; Gaps seed IDs), then Claude (Cursor) → **Codex CLI (GPT)** → Grok. GPT is not a Cursor Task seat by default. Grok is the usual churn-skip candidate after calm Cursor seats. `kind: cli` seats are never skipped by churn-stop.
+**Default roster intent (interleaved since 2026-09-12):** Gemini first as `breadth-auditor` (copy-through Revised; Gaps seed IDs), then alternates with each paid seat — Claude (Cursor) → Gemini → **Codex CLI (GPT)** → Gemini → Grok → Gemini. Gemini/agy is cheap enough to run every other seat instead of once; only the first Gemini seat carries `role: breadth-auditor` — the interleaved passes are ordinary critical reviewers. GPT is not a Cursor Task seat by default. Grok is the usual churn-skip candidate after two calm non-Gemini seats (Claude then Codex, typically). Only the four Gemini seats are guaranteed to run unconditionally on every invocation — Codex counts toward the churn-guard streak like any other non-Gemini seat now (see [Churn guard](#churn-guard)). At the default `churn_guard: 2`, its position ahead of Grok means it's never itself the seat that actually gets skipped; **that stops being true at `churn_guard: 1`**, where a calm Claude alone fires churn-stop before Codex has even run, skipping Codex too.
 
 ## Start
 
@@ -169,17 +169,17 @@ Normalize: lowercase; strip digits and dotted versions; map synonyms (`chatgpt`�
 
 If seat 0 family is `unknown`, do not same-model-skip.
 
-**Effective paths** (default roster Gemini → Claude → Codex → Grok; successful dispatches). Churn skips Grok only when two earlier successful **Cursor** seats are both calm. Gemini-first breadth Gaps are normal `G1-*` IDs — later seats must STATUS and may incorporate them. Codex is `kind: cli` and is never churn-skipped.
+**Effective paths** (default roster Gemini → Claude → Gemini → Codex → Gemini → Grok → Gemini, interleaved since 2026-09-12; successful dispatches, same-model-skip only — this table doesn't cover churn-stop, which is conditional on runtime calm/gaps rather than deterministic). Gemini-first breadth Gaps are normal `G1-*` IDs — later seats must STATUS and may incorporate them. All four Gemini seats are always dispatched regardless of churn state; Codex now counts toward the churn-guard streak like Claude and Grok (see [Churn guard](#churn-guard)). At the default `churn_guard: 2`, its position ahead of Grok means it's never itself the seat that gets skipped on this roster — but that's specific to `churn_guard: 2`; at `churn_guard: 1`, Codex is skippable too.
 
 | Seat-0 family | Effective reviewer path |
 |---|---|
-| Claude | Gemini → Codex → Grok (Claude reviewer same-model-skipped) |
-| GPT / Codex | Gemini → Claude → Grok (Codex reviewer same-model-skipped) |
-| Grok | Gemini → Claude → Codex (Grok same-model-skipped; Codex still runs) |
-| Gemini | Claude → Codex → Grok as churn permits (Gemini same-model-skipped) |
-| Composer or unknown | Gemini → Claude → Codex → Grok; Grok may churn-skip after two calm Cursor seats |
+| Claude | Gemini → Gemini → Codex → Gemini → Grok → Gemini (only the Claude reviewer is same-model-skipped; the other three Gemini passes are unaffected since same-model skip only removes seats matching seat-0's own family) |
+| GPT / Codex | Gemini → Claude → Gemini → Gemini → Grok → Gemini (Codex reviewer same-model-skipped) |
+| Grok | Gemini → Claude → Gemini → Codex → Gemini → Gemini (Grok same-model-skipped; Codex and all Gemini seats still run) |
+| Gemini | Claude → Codex → Grok as churn permits (all four Gemini reviewer seats same-model-skipped — same effective path as before interleaving, since removing every Gemini seat leaves the original three) |
+| Composer or unknown | Gemini → Claude → Gemini → Codex → Gemini → Grok → Gemini; Grok may churn-skip after two calm **non-Gemini** seats (typically Claude then Codex, at the default `churn_guard: 2`) |
 
-A Claude-driven run is **not** “Claude → GPT convergence”: after Gemini, Codex and Grok are the remaining reviewers when Claude is skipped. The Gemini `role: breadth-auditor` and Codex CLI seat do **not** bypass same-model skip.
+A Claude-driven run is **not** “Claude → GPT convergence”: after the first Gemini seat, the remaining reviewers when Claude is skipped are Gemini → Codex → Gemini → Grok → Gemini — five seats, not two. The Gemini `role: breadth-auditor` seat and the Codex CLI seat do **not** bypass same-model skip; neither do the three interleaved ordinary Gemini seats.
 
 ## Cascade
 
@@ -191,7 +191,7 @@ Maintain `calm_streak = 0` and `terminal_calm_streak = 0` and remember the pre-s
 
 For each reviewer in roster order:
 
-1. If churn-stop already triggered for Cursor seats, skip this seat when it is `kind: cursor` **unless** `validation_critical: true` or `request.md` names that seat/label for validation/observation. Never skip remaining `kind: cli` seats after churn-stop (deferred CLI). See [Churn guard](#churn-guard). Apply [Terminal calm skip](#terminal-calm-skip) when `terminal_calm_skip: true` before dispatching a trailing Cursor seat.
+1. If churn-stop already triggered, skip this seat when its resolved family is **not** `gemini` (redefined 2026-09-12 — was `kind: cursor`; Codex now counts) **unless** `validation_critical: true` or `request.md` names that seat/label for validation/observation. Never skip a remaining Gemini seat after churn-stop. See [Churn guard](#churn-guard). Apply [Terminal calm skip](#terminal-calm-skip) when `terminal_calm_skip: true` before dispatching a trailing Cursor seat (note: terminal-calm-skip's own trigger condition is unchanged by this redesign and is currently unreachable on this roster — see that section).
 2. Apply [Same-model skip](#same-model-skip).
 3. **Cursor seats:** resolve `model` with [Family slug resolve](#family-slug-resolve). If no family member is on the Task enum, skip (`rejected-family`). Do not skip only because the exact catalog slug is missing.
 4. Refresh `artifact.md`, `gaps.md`, `open-gaps.md`, `verdicts.md`, `unresolved.md`. Snapshot pre-seat artifact for churn compare. Derive **mandatory STATUS IDs** = blocking IDs whose latest `verdicts.md` entry is not `addressed`. List those IDs as a compact comma-separated header. Do not require STATUS for closed `addressed` IDs (inherit unless the seat reopens them).
@@ -209,7 +209,7 @@ For each reviewer in roster order:
 5. Late Cursor seats: stabilize; Gaps `- none` + `UNCHANGED` when nothing material. **Carve-out:** for `role: breadth-auditor`, Revised defaults to `UNCHANGED`, but Gaps must still report breadth findings so later seats can address them (`- none` means genuinely nothing found).
 6. `show_exchange: ask` → final-only when ambiguous (no duplicate full transcript in chat).
 7. CLI preflight **per command family** before that family's first seat (`agy`/`gemini` vs `codex`; fail independently).
-8. Keep the default 4-seat roster; do not drop Claude/Codex/Gemini for cost by default.
+8. Keep the default 7-seat roster (Gemini/agy interleaved 4x since 2026-09-12); do not drop Claude/Codex/Gemini/Grok for cost by default.
 9. Optional **smoke** roster via reconfigure only (1 Cursor + CLI) for plumbing checks; deep reviews keep the full roster.
 10. Omit placeholder packet files; ordinary seats read `open-gaps.md` not `gaps.md`; inline [reviewer-envelope.md](reviewer-envelope.md).
 11. Optional [Terminal calm skip](#terminal-calm-skip) (`terminal_calm_skip`, default off).
@@ -222,11 +222,17 @@ For each reviewer in roster order:
 
 After each **successful** parse (and after content-loss acceptance when applicable):
 
-1. If Gaps is `- none` **or only new `optional:` gaps** **and** normalized Revised equals normalized pre-seat artifact (including legal `UNCHANGED`) **and** this seat introduced no new `unresolved` / `rejected` statuses on open IDs, increment `calm_streak` **only when this seat is `kind: cursor`**. Else reset `calm_streak` to 0. CLI calm does **not** increment `calm_streak`.
-2. Standing prior `rejected` / `unresolved` IDs do **not** block calm (they are inert for the streak).
-3. When `calm_streak` reaches `churn_guard`: append `failures.md` with `churn-stop` and the calm seat indices. Set a flag: skip remaining **Cursor** seats unless `validation_critical: true` or `request.md` asks to observe/validate that seat/label. **Always** still dispatch remaining `kind: cli` seats.
+**Redefined 2026-09-12: cost-tier-based, not kind-based.** `calm_streak` now tracks calm **non-Gemini** seats (Claude, Codex, Grok — whatever the roster's paid reviewers are), not `kind: cursor` specifically. Gemini/agy seats are excluded entirely from this mechanism in both directions — a Gemini seat never increments, never resets, and is never itself skipped, regardless of whether it was calm. The guard exists to control cost on the seats that cost real money; Gemini is cheap enough that its cost isn't being managed here at all (see the interleaving note in "Default roster intent" above).
 
-**Example (Composer/unknown seat 0):** Gemini breadth runs first (usually not calm if it raised blocking Gaps) → calm Claude → Codex CLI (never churn-skipped; CLI calm does not increment Cursor `calm_streak`) → Grok may still run unless two **Cursor** seats were calm. Do **not** claim Claude+Codex calm-pair churn for skipping Grok (Codex is CLI). Do **not** claim Cursor calm-pair churn when an earlier Cursor family was same-model-skipped.
+**By design, not an oversight (flagged by Council review as G1-5, addressed 2026-09-13):** because Gemini is a no-op either direction, `calm_streak` can bridge across a substantive Gemini revision that happens between two calm non-Gemini seats — e.g. a calm Claude, then a Gemini pass that makes real changes, then a calm Codex still reaches `churn_guard: 2` and fires churn-stop, even though the artifact just changed and no non-Gemini reviewer has seen the post-Gemini state yet. Also, once churn-stop has fired, a later Gemini pass revising the artifact further does not un-fire it — the skip, once triggered, stands for the rest of the run. This is intentional: churn-guard is a pure **expenditure cap on the paid seats**, not an artifact-convergence signal — it exists to stop paying for redundant Claude/Codex/Grok turns, and whether Gemini did real work in between is deliberately irrelevant to that goal, per the user's explicit preference that Gemini's cost (and by extension its activity) not factor into this guard at all. If artifact-convergence semantics are ever wanted instead, a substantive (non-calm) Gemini pass would need to reset `calm_streak` — that would be a different, incompatible design and isn't what's implemented here.
+
+1. If Gaps is `- none` **or only new `optional:` gaps** **and** normalized Revised equals normalized pre-seat artifact (including legal `UNCHANGED`) **and** this seat introduced no new `unresolved` / `rejected` statuses on open IDs, **and this seat's resolved family is not `gemini`**, increment `calm_streak`. If this seat's family **is** `gemini`, `calm_streak` is left unchanged either way — no increment, no reset. Otherwise (a non-Gemini seat that failed the calm test), reset `calm_streak` to 0.
+2. Standing prior `rejected` / `unresolved` IDs do **not** block calm (they are inert for the streak).
+3. When `calm_streak` reaches `churn_guard`: append `failures.md` with `churn-stop` and the calm seat indices. Set a flag: skip remaining seats whose resolved family is **not** `gemini` (Claude, Codex, Grok — whichever remain) unless `validation_critical: true` or `request.md` asks to observe/validate that seat/label. **Always** still dispatch every remaining Gemini seat regardless of streak state.
+
+**Consequence for Codex:** Codex is no longer categorically protected from churn-stop the way `kind: cli` used to protect it — it now counts toward `calm_streak` like any other non-Gemini seat, and is in principle skippable. **At the default `churn_guard: 2`** on the current interleaved roster (Gemini → Claude → Gemini → Codex → Gemini → Grok → Gemini) this changes nothing observable: `calm_streak` can only reach 2 *after* Codex has already run (Codex is the earliest seat, other than Claude, that can push the streak to 2), so by the time churn-stop could fire, Codex is no longer "remaining" — Grok is the only seat left that's ever actually skippable at this setting. **This does not hold at `churn_guard: 1`**: a calm Claude alone reaches the threshold before Codex is dispatched, and churn-stop then skips every remaining non-Gemini seat — Codex included. If the roster is reordered later so a non-Gemini seat follows two other calm non-Gemini seats, that seat becomes a real skip candidate under this rule too — this is a deliberate design point now, not an oversight.
+
+**Example (current 7-seat interleaved roster, Composer/unknown seat 0):** Gemini seat 1 (breadth, usually not calm if it raised blocking Gaps; excluded from the streak either way) → calm Claude (`calm_streak` → 1) → Gemini pass 2 (excluded, streak stays 1) → calm Codex (`calm_streak` → 2, reaches `churn_guard: 2`) → churn-stop fires: skip Grok (the only remaining non-Gemini seat) → Gemini pass 3 and Gemini pass 4 still run regardless. If Codex was *not* calm instead, `calm_streak` resets to 0 and Grok still runs on schedule.
 
 ### Terminal calm skip
 
@@ -238,7 +244,9 @@ After each **successful** parse (same calm test as churn, except **any kind** in
 2. When `terminal_calm_skip` is true **and** `terminal_calm_streak` has reached `churn_guard` **and** every **remaining** seat is `kind: cursor` and independently skippable, skip those trailing Cursor seats. `failures.md` reason `terminal-calm`.
 3. **Never skip:** `kind: cli`; `validation_critical: true`; a seat or label that `request.md` names for validation or observation; `role: breadth-auditor`. If any remaining seat is protected, run it and reevaluate the tail afterward.
 
-CLI calm **may** increment `terminal_calm_streak` even though it must not increment Cursor `calm_streak`. Example: Gemini (blocking gaps, not calm) → Claude (rewrite) → Codex `UNCHANGED` + Gaps none → with `terminal_calm_skip: true` and `churn_guard: 1` (or two terminal-calm seats if guard is 2), skip Grok. If Codex still edits, Grok still runs.
+CLI calm **may** increment `terminal_calm_streak` even for seats excluded from `calm_streak`. **Corrected 2026-09-13** (this sentence used to say "must not increment Cursor `calm_streak`" — stale since the 2026-09-12 redefinition made `calm_streak` non-Gemini-based, not Cursor-based; Codex CLI *does* increment `calm_streak` now, only Gemini is excluded from it — but the point about `terminal_calm_streak` being a separate counter that any kind, including CLI, can increment stands unchanged). Example (pre-interleaving 4-seat roster): Gemini (blocking gaps, not calm) → Claude (rewrite) → Codex `UNCHANGED` + Gaps none → with `terminal_calm_skip: true` and `churn_guard: 1` (or two terminal-calm seats if guard is 2), skip Grok. If Codex still edits, Grok still runs.
+
+**Corrected 2026-09-13 — the original "confirmed dead, no reading under which it still works" claim here was wrong; caught by Council review of the interleaving diff itself (G1-2).** Rule 2 requires *every remaining seat* to be `kind: cursor` before skipping the trailing run. On the **default** roster (Claude or a Cursor-family seat 0, or Composer/unknown seat 0) this is indeed a no-op: the roster always ends on a Gemini (CLI) seat (position 7), so there is never a point where the entire remaining tail is Cursor-kind. **But it is *not* dead on a Gemini-family seat 0**: same-model skip removes all four Gemini reviewer seats there, leaving the effective path Claude → Codex → Grok — which *does* end on a trailing Cursor seat (Grok), so `terminal_calm_skip: true` can still fire in that specific case, exactly as it did pre-interleaving. If terminal-calm-skip's cost savings matter for non-Gemini seat-0 runs specifically, either move Grok to the last position (breaking the strict alternation) or accept the feature is inert there until the roster changes again.
 
 ### Family slug resolve
 

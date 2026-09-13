@@ -149,11 +149,22 @@ model picker here, unlike Cursor. Before each reviewer, resolve its family from
 `claude-fable` family reviewer is skipped automatically** — append to
 `failures.md`, one line to the user, continue.
 
-Shared `config.yaml` default order is **Gemini → Claude → Codex CLI (GPT) →
-Grok**, with Gemini first as `role: breadth-auditor` (copy-through; Gaps for
-later seats). With the automatic Claude-family skip, this sibling effectively
-runs **Gemini → Codex → Grok**. (Do not claim stale paths that put Gemini last,
-use Cursor Task GPT, or “Grok → GPT → Claude, effectively Grok → GPT.”)
+Shared `config.yaml` default order (interleaved since 2026-09-12 — Gemini/agy
+is cheap enough to run every other seat) is **Gemini → Claude → Gemini →
+Codex CLI (GPT) → Gemini → Grok → Gemini**, with only the first Gemini seat as
+`role: breadth-auditor` (copy-through; Gaps for later seats) — the three
+interleaved Gemini passes are ordinary critical reviewers. With the automatic
+Claude-family skip removing exactly the one Claude seat, this sibling
+effectively runs **Gemini → Gemini → Codex → Gemini → Grok → Gemini** (six of
+the seven seats). (Do not claim stale paths that put Gemini last, use Cursor
+Task GPT, claim only one Gemini seat exists, or “Grok → GPT → Claude,
+effectively Grok → GPT.”)
+
+Note: the Cursor sibling's `config.yaml` also redefined `churn_guard`'s
+counting dimension this same day (family-based — Gemini excluded, Codex now
+counts — see the root `SKILL.md` § Churn guard). That change is Cursor-only
+and doesn't apply here — this sibling has no churn-stop concept at all, per
+the paragraph below.
 
 This sibling has **no** Cursor churn-stop, **no** `terminal_calm_skip`, and **no** content-loss guard: every non-skipped seat runs, and a breadth seat's Revised is accepted on ordinary parse rules. Do not claim Cursor's Grok-skip effective paths. `UNCHANGED`, `verdicts.md`, gap tiers, open-gap packets, and placeholder omission **do** apply here (same envelope grammar as Cursor).
 

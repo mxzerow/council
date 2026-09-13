@@ -214,7 +214,7 @@ Do **not** pass prompt text via `Invoke-Expression` or `cmd /c`.
 
 Default GPT reviewer. Not a Cursor Task seat. Family: `gpt` (same-model skip vs ChatGPT/Codex seat 0).
 
-**Churn-guard, as of 2026-09-12:** unlike Gemini/agy, Codex CLI is no longer categorically protected from churn-stop — `calm_streak` now counts every non-Gemini seat (Claude, Codex, Grok), and a calm Codex reviewer can push the streak to `churn_guard` and trigger a skip of whatever non-Gemini seats remain. On the current default roster this is moot in practice (Codex sits ahead of Grok, the only other skippable seat, so Codex itself is never the one skipped) — but don't assume `kind: cli` alone protects a seat from churn-stop anymore; only Gemini/agy is exempt. See SKILL.md § Churn guard.
+**Churn-guard, as of 2026-09-12:** unlike Gemini/agy, Codex CLI is no longer categorically protected from churn-stop — `calm_streak` now counts every non-Gemini seat (Claude, Codex, Grok), and a calm Codex reviewer can push the streak to `churn_guard` and trigger a skip of whatever non-Gemini seats remain. On the current default roster **at `churn_guard: 2`** this is moot in practice (Codex sits ahead of Grok, the only other skippable seat, so Codex itself is never the one skipped) — **but at `churn_guard: 1`, a calm Claude alone fires churn-stop before Codex has run, and Codex is skipped too.** Don't assume `kind: cli` alone protects a seat from churn-stop anymore; only Gemini/agy is exempt. See SKILL.md § Churn guard.
 
 ```yaml
 - kind: cli

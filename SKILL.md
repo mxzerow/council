@@ -394,7 +394,8 @@ Read [models.md](models.md). Then:
 3. If Gemini/Antigravity is chosen, run that family's CLI preflight from [models.md](models.md). If Codex is chosen, run Codex preflight (same resolved launcher). If missing/failed, print install + login steps for **that** family and ask whether to keep the seat or pick another. A failed probe: do **not** persist a broken seat unless the user explicitly insists. Do not treat a Gemini probe failure as a Codex failure (or vice versa).
 4. Ask whether to persist and the `show_exchange` default (`ask` / `always` / `never`).
 5. Write [config.yaml](config.yaml) if they chose to persist: keep hygiene keys; preserve comments on `churn_guard: 0` and `terminal_calm_skip`; **preserve** any existing `role: breadth-auditor` (and related roster comments) unless the user explicitly removes that seat or role — do not silently demote Gemini to an ordinary CLI reviewer. One-shot overrides do not persist unless they say to save.
-6. Run the cascade unless they chose **Reconfigure only**.
+6. If persisted, add an entry to [CHANGELOG.md](CHANGELOG.md) (dated, `Changed`/`Added`/`Removed` as fits) describing the roster/config change — this file is shared with the Claude sibling and is the only consumer-facing record of what changed, since this repo has no version pins or release notifications. Skip only for a reconfigure that changes nothing observable (e.g. re-persisting the same roster).
+7. Run the cascade unless they chose **Reconfigure only**.
 
 ## Examples
 

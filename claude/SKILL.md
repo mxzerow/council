@@ -275,4 +275,9 @@ user explicitly removes it.
    `role: breadth-auditor` for Gemini/Antigravity seats.
 4. Ask whether to persist (writes the shared `config.yaml`) and the
    `show_exchange` default.
-5. Run the cascade unless they chose reconfigure-only.
+5. If persisted, add an entry to `CHANGELOG.md` (dated, `Changed`/`Added`/
+   `Removed` as fits) describing the roster/config change — shared with
+   Cursor's sibling and the only consumer-facing record of what changed,
+   since this repo has no version pins or release notifications. Skip only
+   for a reconfigure that changes nothing observable.
+6. Run the cascade unless they chose reconfigure-only.

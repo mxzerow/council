@@ -6,6 +6,8 @@ The current chat model writes the first answer. Configurable reviewers then run 
 
 [![skills.sh](https://skills.sh/b/mxzerow/council)](https://skills.sh/mxzerow/council)
 
+See [CHANGELOG.md](CHANGELOG.md) for what's changed in the roster and config over time.
+
 ## Install (Cursor)
 
 ```bash

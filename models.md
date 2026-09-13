@@ -31,7 +31,9 @@ The initial draft is always the current chat model. It is not a catalog seat. Ma
   role: breadth-auditor
   model: gemini-3.8-flash-high   # default seat; alternate: gemini-3.1-pro-high for hard reviews
   # effort: high                # optional: low | medium | high (often already in the model slug)
-  # Do not set validation_critical — kind: cli is already never churn-skipped
+  # Do not set validation_critical — Gemini/agy seats are never churn-skipped regardless
+  # (unlike Codex CLI, which counts toward churn-guard's streak as of 2026-09-12 — see the
+  # Codex CLI section below, and SKILL.md § Churn guard)
 ```
 
 Also valid: `command: gemini` (legacy Gemini CLI; prefer `agy` on consumer accounts after June 2026).
@@ -211,6 +213,8 @@ Do **not** pass prompt text via `Invoke-Expression` or `cmd /c`.
 ## Codex CLI (GPT family)
 
 Default GPT reviewer. Not a Cursor Task seat. Family: `gpt` (same-model skip vs ChatGPT/Codex seat 0).
+
+**Churn-guard, as of 2026-09-12:** unlike Gemini/agy, Codex CLI is no longer categorically protected from churn-stop — `calm_streak` now counts every non-Gemini seat (Claude, Codex, Grok), and a calm Codex reviewer can push the streak to `churn_guard` and trigger a skip of whatever non-Gemini seats remain. On the current default roster this is moot in practice (Codex sits ahead of Grok, the only other skippable seat, so Codex itself is never the one skipped) — but don't assume `kind: cli` alone protects a seat from churn-stop anymore; only Gemini/agy is exempt. See SKILL.md § Churn guard.
 
 ```yaml
 - kind: cli

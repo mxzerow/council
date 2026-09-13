@@ -1,16 +1,31 @@
 show_exchange: ask
-max_reviewers: 5
-# churn_guard: 0 disables churn-stop; >=1 = consecutive calm seats before skipping remaining Cursor seats (CLI still runs)
+max_reviewers: 7
+# churn_guard: 0 disables churn-stop; >=1 = consecutive calm NON-GEMINI seats before skipping
+# remaining non-Gemini seats (redefined 2026-09-12 when Gemini went interleaved — was
+# Cursor-only; Codex counts toward the streak now too, see SKILL.md § Churn guard).
+# Gemini/agy seats are never part of this either way — never counted, never skipped.
 churn_guard: 2
 # terminal_calm_skip: false by default. When true, skip trailing Cursor seats after churn_guard consecutive terminal-calm seats (any kind, including CLI). Never skip CLI, validation_critical, request-named, or breadth-auditor seats. churn_guard: 0 disables this too.
+# NOTE (2026-09-12): with Gemini interleaved, the roster always ends on a Gemini (CLI) seat,
+# so terminal_calm_skip's "every remaining seat is kind: cursor" trigger can never be
+# satisfied — this feature is currently inert regardless of its true/false value. See
+# SKILL.md § Terminal calm skip.
 terminal_calm_skip: false
 cli_timeout_sec: 600
 run_retention_count: 10
 run_retention_days: 14
 stall_checkin_sec: 60
-# Default roster: Gemini first (breadth-auditor) seeds Gaps; Claude (Cursor) → Codex CLI (GPT) → Grok.
+# Default roster (interleaved, added 2026-09-12): Gemini/agy is cheap enough to run every
+# other seat instead of once, so it gets a fresh review turn after each paid seat's revision:
+# Gemini (breadth-auditor, seeds Gaps) → Claude (Cursor) → Gemini (ordinary reviewer) →
+# Codex CLI (GPT) → Gemini (ordinary reviewer) → Grok (Cursor) → Gemini (ordinary reviewer,
+# final check). Only the first Gemini seat carries role: breadth-auditor — that role prefers
+# Revised UNCHANGED and stays in breadth-scan mode, which would make the repeat passes weaker
+# critical reviewers than intended; the interleaved seats are ordinary full reviewers.
 # GPT is Codex CLI (not Cursor Task). When `codex login status` says Logged in using ChatGPT, ChatGPT/Codex quota applies.
-# Grok may be skipped after a calm Cursor pair (churn_guard). kind: cli seats are never churn-skipped.
+# Grok may be skipped after two calm non-Gemini seats (churn_guard — counts Claude/Codex/Grok,
+# not Gemini). Gemini seats are never churn-skipped; Codex counts toward the streak like any
+# non-Gemini seat now but sits ahead of Grok, so it's never itself the one that gets skipped.
 # Gemini defaults to 3.8 Flash High; pin Pro only for hard reviews.
 reviewers:
   - kind: cli
@@ -19,15 +34,28 @@ reviewers:
     role: breadth-auditor
     model: gemini-3.8-flash-high
     # Optional hard-review pin: model: gemini-3.1-pro-high
-    # Do not set validation_critical here — kind: cli is already never churn-skipped
+    # Do not set validation_critical here — Gemini/agy seats are never churn-skipped regardless
+    # (unlike Codex, which counts toward churn-guard's streak as of 2026-09-12)
   - kind: cursor
     model: claude-sonnet-5-thinking-medium
     label: Claude Sonnet 5 Thinking Medium
+  - kind: cli
+    command: agy
+    label: Gemini (Antigravity CLI) — pass 2
+    model: gemini-3.8-flash-high
   - kind: cli
     command: codex
     label: Codex CLI (GPT)
     model: gpt-5.6-sol
     effort: medium
+  - kind: cli
+    command: agy
+    label: Gemini (Antigravity CLI) — pass 3
+    model: gemini-3.8-flash-high
   - kind: cursor
     model: cursor-grok-4.6-medium
     label: Cursor Grok 4.6 Medium
+  - kind: cli
+    command: agy
+    label: Gemini (Antigravity CLI) — pass 4
+    model: gemini-3.8-flash-high

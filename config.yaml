@@ -11,13 +11,13 @@ stall_checkin_sec: 60
 # Default roster: Gemini first (breadth-auditor) seeds Gaps; Claude (Cursor) → Codex CLI (GPT) → Grok.
 # GPT is Codex CLI (not Cursor Task). When `codex login status` says Logged in using ChatGPT, ChatGPT/Codex quota applies.
 # Grok may be skipped after a calm Cursor pair (churn_guard). kind: cli seats are never churn-skipped.
-# Gemini defaults to 3.7 Flash High; pin Pro only for hard reviews.
+# Gemini defaults to 3.8 Flash High; pin Pro only for hard reviews.
 reviewers:
   - kind: cli
     command: agy
     label: Gemini (Antigravity CLI)
     role: breadth-auditor
-    model: gemini-3.7-flash-high
+    model: gemini-3.8-flash-high
     # Optional hard-review pin: model: gemini-3.1-pro-high
     # Do not set validation_critical here — kind: cli is already never churn-skipped
   - kind: cursor

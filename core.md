@@ -23,7 +23,7 @@ One list, `seats:` in `config.yaml`, for both harnesses. A seat names a **model*
 
 - `reviewer`: critical reviewer, **gaps only**, using the inlined [reviewer-envelope.md](reviewer-envelope.md).
 - `breadth-auditor`: a `reviewer` that also reads [reviewer-prompt.md](reviewer-prompt.md) and prioritizes breadth findings.
-- `rewriter`: final readability rewrite (step 7). Accepted by validation but **not implemented yet**: skipped as `rewriter-not-implemented`.
+- `rewriter`: the final readability rewrite ([Stages](#stages), step 4). It is not a review: Same-model skip does not apply, and it runs after integration.
 - The integration pass is a **stage**, not a seat; the parser knows it as `--role integrator`, the only role allowed to return a changed Revised.
 
 **Transport** is per harness (Cursor: every family through Task; Claude Code: `gemini`→`agy`, `gpt`→Codex CLI, `grok`→Grok CLI, `claude`→skipped). A family with no transport in the current harness is **skipped, not an error** (`no-transport`). **Model versions** are resolved by [Model resolution](#model-resolution), never stored. `max_reviewers` caps the seats used; list order is run order.
@@ -82,7 +82,7 @@ Never copy `.env`, keys or credentials into any of these or into a prompt. `requ
 
 ## Same-model skip
 
-A model must not review its own draft. After seat 0 store `seat0_family` in `meta.md`; before each reviewer compare the seat's `family`; on a match **skip** the seat, log it in `failures.md`, tell the user in one line, continue. `unknown` never skips. Families are by provider only (version, effort and line are ignored): `grok`, `gpt` (incl. ChatGPT, Codex), `claude`, `gemini` (incl. Antigravity, `agy`), `composer`. The integration stage is not a review and is never skipped by this rule.
+A model must not review its own draft. After seat 0 store `seat0_family` in `meta.md`; before each reviewer compare the seat's `family`; on a match **skip** the seat, log it in `failures.md`, tell the user in one line, continue. `unknown` never skips. Families are by provider only (version, effort and line are ignored): `grok`, `gpt` (incl. ChatGPT, Codex), `claude`, `gemini` (incl. Antigravity, `agy`), `composer`. The integration and rewrite stages are not reviews and are never skipped by this rule.
 
 ## Stages
 
@@ -93,13 +93,18 @@ A model must not review its own draft. After seat 0 store `seat0_family` in `met
    - **Brief (paths only):** `request.md`, `artifact.md`, `open-gaps.md`, `unresolved.md`, the inlined envelope, and: *You may return a changed Revised. STATUS every open gap ID, blocking and optional: `addressed` (incorporated), `rejected — reason`, or `unresolved` only if you cannot decide. List each rejection under Unresolved. Return the complete replacement artifact, or `UNCHANGED` if every gap is rejected or already satisfied. Mint new gaps only for problems you introduce or find while integrating.*
    - Parse with `--role integrator`; the same retry and dispatch-budget rules apply.
    - **Audit:** every gap it rejects or leaves unresolved is printed at Return with its reason.
-4. **Rewrite (step 7, not implemented).**
+4. **Rewrite, once**, after integration, if the roster has a `rewriter` seat whose transport and line resolve (otherwise skip it with the reason and the integrated artifact is the result). A cheap model (Gemini Flash) rewrites the artifact for a reader who is not a specialist. It cannot be trusted with one big call or with meaning, so `scripts/council_rewrite.py` does the safe parts:
+   - `prepare --run <run>` saves `artifact-pre-rewrite.md`, masks protected spans (code, tables, URLs, paths, IDs, quotes) as `@@P<n>@@`, and writes `rewrite/chunk-<i>-prompt.md` (the instructions plus one chunk of about 6k tokens, so a 64k output cap is never reached).
+   - For each chunk dispatch the rewriter seat with: *Read `<chunk prompt>` and do exactly what it says. Output only the rewritten chunk followed by the final REWRITE_END line.* Save the reply to a file, then `check --run <run> --chunk <i> --reply <file>`. Exit 3 = retry once, appending the printed reasons to the chunk prompt (this uses the seat's one retry); exit 4 = that chunk keeps its original wording. An empty reply is a seat failure: `council_resolve.py classify` the stderr, and on `quota` stop at once; never retry at a higher effort.
+   - `assemble --run <run>` restores the protected text, verifies the headings are identical, and writes `artifact.md`. If more than half the chunks kept their original wording, the pre-rewrite artifact is kept (`fallback_all`). `rewrite-report.json` lists every addition.
+   - The rewriter may rephrase and may add short plain-language explanations wrapped in `{{+ … +}}` (no digits, no new facts, at most 140 characters); it must keep every claim, number, heading and protected span. The script rejects a chunk for: missing or wrong end marker, empty output, a placeholder lost, added or duplicated, a number lost or added, a digit or over-long text inside an addition, unbalanced or near-miss markers, a changed heading, lost negations or qualifiers (not, never, must, only, unless, except…), or a length outside 70-220% of the input. Placeholder order may change.
+   - Tests: `cd scripts && python -B -m unittest test_council_rewrite`.
 
 ## Cascade loop
 
 Seats run one after another, never in parallel. For each reviewer in roster order:
 
-1. Apply [Same-model skip](#same-model-skip) and the roster rules (`no-transport`, `rewriter-not-implemented`).
+1. Apply [Same-model skip](#same-model-skip) and the roster rules (`no-transport`). `rewriter` seats are not reviewers: they run in the rewrite stage.
 2. Get the **open blocking IDs**: `python -I scripts/council_parse.py open-ids --run <run>` (blocking IDs whose latest verdict is not `addressed`; `rejected` and `unresolved` stay open). Packet files are already current.
 3. Build the seat prompt: seat index, label, total seats, run mode, family, role, the open blocking IDs (comma-separated, not prose), absolute packet paths, the inlined [reviewer-envelope.md](reviewer-envelope.md) (plus [reviewer-prompt.md](reviewer-prompt.md) for a `breadth-auditor`), and a plain statement that the seat is **gaps only**. Never paste `artifact.md` into an argv or Task prompt.
 4. **DISPATCH(seat)** (harness-specific), then run the parser (below).
@@ -132,7 +137,7 @@ python -I scripts/council_parse.py apply|reject --run <run> --seat <n>
 
 What `parse` does (these rules are its contract): strip preamble before the first sentinel; require REVISED and END (the **last** END wins); **identity** = Revised exactly `UNCHANGED` (trimmed, case-insensitive); mint `G<seat>-<n>` with tiers (`optional:` else blocking; bullets `-` `*` `+` `1.` `1)`; unbulleted prose is kept as one gap); apply STATUS (`addressed` only from a non-identity Revised, or `addressed (pre-existing)` with identity; a closed ID STATUSed `unresolved`/`rejected` reopens; tier is never reclassified; markdown, backticked, lowercase and table-row IDs are tolerated); **dissent check**: every open blocking ID must appear in STATUS, omitted ones are restored as `unresolved` under `### Orchestrator — restored` (optional IDs are not required); write `artifact.md` (integrator only) before committing `gaps.json`, then render `gaps.md`, `unresolved.md`, `verdicts.md`, `open-gaps.md`. Rendering is derived from `gaps.json` on every command, so an interrupted run heals on the next call.
 
-`--hold-artifact` (for stages that need a check before acceptance, e.g. the step 7 rewriter) commits the seat's gaps at once but holds its Revised **and** its status changes; `apply` commits them, `reject` discards them (`revised-rejected`). Tests: `cd scripts && python -B -m unittest test_council_parse`.
+`--hold-artifact` (available for any stage that needs a check before acceptance; the rewriter has its own script) commits the seat's gaps at once but holds its Revised **and** its status changes; `apply` commits them, `reject` discards them (`revised-rejected`). Tests: `cd scripts && python -B -m unittest test_council_parse`.
 
 **Illegal identity** = identity plus plain `addressed` on a currently open ID. After the retry slot is spent: keep the identity artifact, apply no invalid closings, log `illegal-identity`, continue (never a third dispatch). Optional IDs nobody STATUSed are listed once at Return.
 
@@ -149,5 +154,6 @@ After Return (never delete the current run), under `<runs_dir>` delete folders t
 1. The final artifact (no extra editorial pass).
 2. **Gaps not incorporated** (omit when every gap was addressed): every gap still open after integration with ID, tier, minting seat and the integrator's reason (`rejected — why`, `unresolved`, or restored); optional IDs nobody STATUSed once. Do not silently rewrite the artifact from them.
 3. Other non-`none` items in `unresolved.md` as a short **Unresolved** list.
-4. One line: roster used with skips, failures and remaps (`same-model`, `no-transport`, `rejected-family`, `rejected-slug`, `family-remap`, `seat0-id-strip`, `rewriter-not-implemented`, `revised-not-allowed`, `revised-rejected`, `illegal-identity`, `cli-preflight-agent|agy|codex`, parse failures, timeouts, `path-refuse-role`).
+   If the rewrite stage ran: say so, and list its additions from `rewrite-report.json` as **Added explanations (N)** (they are the rewriter's, not the author's), any chunks that kept their original wording, and that the pre-rewrite text is `artifact-pre-rewrite.md`.
+4. One line: roster used with skips, failures and remaps (`same-model`, `no-transport`, `rejected-family`, `rejected-slug`, `family-remap`, `seat0-id-strip`, `rewrite-fallback`, `revised-not-allowed`, `revised-rejected`, `illegal-identity`, `cli-preflight-agent|agy|codex`, parse failures, timeouts, `path-refuse-role`).
 5. If the exchange was requested: write `<run>/exchange.md`; set `<skill-root>/last-exchange.md` to one line with its absolute path (Claude Code instead appends the transcript in chat). Secret hygiene applies.

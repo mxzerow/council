@@ -12,23 +12,21 @@ stall_checkin_sec: 60
 # line. Optional keys: role (reviewer | breadth-auditor | rewriter), label, pin (exact slug).
 # Unknown role values are a config error. A family with no transport in the current harness is
 # skipped (Claude Code skips `claude` seats: same family as the orchestrator).
-# The previous 7-seat Claude Code roster and 4-seat Cursor roster are in git history
-# (commit 5ccf6c1, config.yaml).
+# Lineup: Opus drafts (seat 0) -> reviewers report gaps only -> Opus integrates (a stage, not a seat)
+# -> the rewriter polishes for readability. The previous 7-seat Claude Code and 4-seat Cursor
+# rosters are in git history (commit 5ccf6c1, config.yaml).
 seats:
   - family: gemini
     line: argon
     effort: medium
     role: breadth-auditor
     label: Gemini Argon (breadth)
-  - family: claude
-    line: opus
-    effort: medium
-    label: Claude Opus
   - family: gpt
     line: sol
     effort: medium
     label: GPT Sol
   - family: gemini
-    line: argon
+    line: flash
     effort: medium
-    label: Gemini Argon (final pass)
+    role: rewriter
+    label: Gemini Flash (rewrite)

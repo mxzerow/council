@@ -21,3 +21,7 @@ $r = Invoke-Seat $agy $tokens ($timeoutSec * 1000) $outFile $errFile
 `--workspace` and `--trust` no longer exist on `agy`, and `--print` followed by another flag needs the attached form `--print=<prompt>`; an argument-parsing error (not a permission one) means this drift.
 
 Reply = stdout. Failure classes: see common.md. Preflight: common.md, with `--model` set to the first configured `gemini` slug.
+
+## Rewriter chunk calls
+
+Same invoke, with `-p "Read <run>\rewrite\chunk-<i>-prompt.md and do exactly what it says. Output only the rewritten chunk followed by the final REWRITE_END line. Do not write any files."` and `--add-dir <run>`. Save stdout to a file and pass it to `council_rewrite.py check`. Verified live 2026-10-23 with `gemini-3.8-flash-medium`: an occasional empty reply happens (two in a row once, then fine); treat empty output as a seat failure, classify stderr, and retry once.

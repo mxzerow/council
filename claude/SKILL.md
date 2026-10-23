@@ -79,7 +79,7 @@ The orchestrator is always Claude (`family: claude`). **Any `claude`-family seat
 | `claude` | skipped (same family) |
 | `composer` | none → skipped, `no-transport` |
 
-The default roster (Gemini Argon → Claude Opus → GPT Sol → Gemini Argon) therefore runs as **Argon → Sol → Argon**. A `rewriter` seat is skipped (`rewriter-not-implemented`) until step 7.
+The default roster (Gemini Argon → GPT Sol → Gemini Flash rewriter) runs as **Argon → Sol**, then the Opus integration stage, then the **Flash rewrite**. The rewriter is not a reviewer and is exempt from the skip.
 
 ## Dispatch (Claude Code)
 
@@ -89,6 +89,10 @@ For each seat core.md says to dispatch:
 2. Run the seat's transport recipe (`recipes/agy.md`, `recipes/codex.md` or `recipes/grok.md`, built on `recipes/common.md`). Before the first seat of each transport, run that transport's preflight. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-codex`); the others still run.
 3. Save the raw reply to `seat-<n>-<slug>.md` (Codex: the fresh `-o` file) and run the parser; read only its JSON summary (core.md § Envelope parser). On exit 3 or 4 retry once, then re-run with `--final-attempt`; never a third dispatch.
 4. If `role: breadth-auditor` minted blocking gaps, later seats must STATUS them (the parser enforces this).
+
+### Rewrite stage
+
+After integration, run core.md § Stages step 4 with the `rewriter` seat: each chunk is one `agy` call (`recipes/agy.md`) whose prompt is `rewrite/chunk-<i>-prompt.md` and whose stdout is saved to a file for `council_rewrite.py check`. Resolve the seat's model like any other (`--source agy`, line `flash`). A `no-line-match` or `no-catalog` skips the rewrite with the reason.
 
 ### Integration stage
 

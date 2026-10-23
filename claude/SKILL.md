@@ -148,8 +148,9 @@ with the supplied artifact's author family if known, else `family: unknown`.
 
 ## Run folder
 
-Create `%USERPROFILE%\.claude\skills\council\runs\<yyyy-mm-ddTHH-MM-SS>\`
-(colon-free, absolute) and keep it current:
+Resolve `runs_dir`: `config.local.yaml` (gitignored, machine-specific) >
+`config.yaml` > default `<shared root>\runs`. Create it if missing. Then create
+`<runs_dir>\<yyyy-mm-ddTHH-MM-SS>\` (colon-free, absolute) and keep it current:
 
 | File | Contents |
 |---|---|

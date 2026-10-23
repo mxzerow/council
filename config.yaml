@@ -1,4 +1,7 @@
 show_exchange: ask
+# runs_dir: where run folders (and later resolver state) live. Resolution order:
+# config.local.yaml (gitignored) > this file > default <skill-root>/runs. Omit to use the default.
+# runs_dir: D:\Documents\.council-runs
 max_reviewers: 7
 # churn_guard: 0 disables churn-stop; >=1 = consecutive calm NON-GEMINI seats before skipping
 # remaining non-Gemini seats (redefined 2026-09-12 when Gemini went interleaved — was

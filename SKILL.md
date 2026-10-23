@@ -50,6 +50,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 | Key | Default |
 |-----|---------|
 | `show_exchange` | `ask` |
+| `runs_dir` | `<skill-root>\runs` — resolved as: `config.local.yaml` (gitignored, machine-specific) > `config.yaml` > this default. Created if missing. Cursor Task seats must be able to read it; keep it inside the workspace/skill tree until that is verified |
 | `max_reviewers` | `7` (raised from `5` on 2026-09-12 to match the interleaved default roster — if this key is ever removed from `config.yaml`, falling back to `5` would silently truncate the 7-seat roster and drop Grok plus the final Gemini pass) |
 | `churn_guard` | `2` |
 | `terminal_calm_skip` | `false` |
@@ -141,7 +142,7 @@ Initialize `gaps.md` and `unresolved.md` as empty (`none` / no IDs yet). Initial
 
 ## Run folder
 
-Create `<skill-root>\runs\<yyyy-mm-ddTHH-MM-SS>\` (colon-free timestamp; absolute path) and keep it updated:
+Create `<runs_dir>\<yyyy-mm-ddTHH-MM-SS>\` (colon-free timestamp; absolute path; `runs_dir` per [Config defaults](#config-defaults)) and keep it updated:
 
 | File | Contents |
 |------|----------|
@@ -392,7 +393,7 @@ Task seats: no internal poll; user interrupt if hung.
 
 ## Run retention
 
-After Return (never delete the current run): under `<skill-root>\runs\`, delete folders that are **both**:
+After Return (never delete the current run): under `<runs_dir>`, delete folders that are **both**:
 
 1. Older than `run_retention_days` (default 14), where age is computed by parsing the folder name `yyyy-mm-ddTHH-MM-SS` as **local** wall time; and
 2. Not among the newest `run_retention_count` (default 10) folders, where “newest” means sort folder names **descending lexicographically** (the timestamp format is sortable).

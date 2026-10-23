@@ -26,9 +26,27 @@ One list, `seats:` in `config.yaml`, for both harnesses. A seat names a **model*
 - `rewriter`: final readability rewrite (step 7). Accepted by validation but **not implemented yet**: skipped as `rewriter-not-implemented`.
 - The integration pass is a **stage**, not a seat; the parser knows it as `--role integrator`, the only role allowed to return a changed Revised.
 
-**Transport** is per harness (Cursor: every family through Task; Claude Code: `gemini`→`agy`, `gpt`→Codex CLI, `grok`→Grok CLI, `claude`→skipped). A family with no transport in the current harness is **skipped, not an error** (`no-transport`). **Slug resolution** (interim, formalized in step 6): the harness resolves `family`+`line`+`effort` against its live catalog, preferring the highest version of that line; never cross lines; never guess a slug; if no catalog is reachable, skip the seat and say why. `max_reviewers` caps the seats used; list order is run order.
+**Transport** is per harness (Cursor: every family through Task; Claude Code: `gemini`→`agy`, `gpt`→Codex CLI, `grok`→Grok CLI, `claude`→skipped). A family with no transport in the current harness is **skipped, not an error** (`no-transport`). **Model versions** are resolved by [Model resolution](#model-resolution), never stored. `max_reviewers` caps the seats used; list order is run order.
 
 **Migration.** The old `reviewers:` / `cursor_reviewers:` keys are removed. If either is present without `seats:`, stop at Start and point here: drop `kind`, `command`, `model`; turn `model` into `family`/`line`/`effort` (`gemini-4-argon-medium` → gemini/argon/medium; Codex `gpt-5.6-sol` + `effort: medium` → gpt/sol/medium); keep `role` and `label`.
+
+## Model resolution
+
+A seat stores `family` + `line` + `effort`. `scripts/council_resolve.py` turns it into a slug, once per non-skipped seat, before the roster is shown:
+
+```
+python -I scripts/council_resolve.py resolve --family F --line L [--effort E] [--pin SLUG] --source S --state <runs_dir>\_resolved.json
+```
+
+`--source`: Claude Code `agy` (gemini), `codex` (gpt), `grok` (grok); Cursor `file:<run>\task-models.txt` (the Task `model` enum, one slug per line). The script reads the catalogs itself, so a 40 KB Codex cache never enters your context. Output is one JSON line; `status: skip` means skip the seat and say why.
+
+It enforces: the **newest version of the same family and line**, compared numerically (3.10 > 3.9 > 3.8); **never another line** (Flash never becomes Argon; a `pro` line with no catalog entry is `no-line-match`); effort exact, else nearest at the newest version (`effort_note`); a `pin` used verbatim (never upgraded, never downgraded); slugs rejected within the last 7 days skipped (`cooldown_skipped`); catalog unreachable → the last slug that worked (`from: last_good`), else skip `no-catalog`. Tell the user in one line when a seat moved to a newer version (`upgraded_from`) or used `last_good`. Never write `config.yaml` for any of this.
+
+After a dispatch: on success `mark-good --key <key> --slug <slug> --state <state>`. On failure run `classify --file <stderr or reply>`: only **`model-rejected`** is cached. Then `mark-rejected --slug <slug>`, `resolve` once more (it returns the next-lower version), tell the user (`upgrade-rejected`), and use it. `quota`, `auth`, `network`, `timeout` and `other` are never cached; they skip the seat (reason named in `failures.md`). A pinned seat that fails is skipped, never downgraded. Other commands: `list --source S [--family F]` shows what a catalog offers. Tests: `cd scripts && python -B -m unittest test_council_resolve`.
+
+## Runtime override (this run only)
+
+The user may name a different roster in the `/council` message: `this time only: Grok then Gemini`, `models: gemini argon, gpt sol`, or exact slugs. Resolve each name as family + line through the resolver (or as an exact slug, which is a `pin`). The override **replaces** the roster in the order given unless the request is clearly additive ("also run Grok"). Same-model skip still applies to it. Never write `config.yaml` for an override; persist only through Reconfigure when the user says to save. A name that cannot be resolved is left out and reported, never guessed.
 
 ## When not to use
 
@@ -87,6 +105,8 @@ Seats run one after another, never in parallel. For each reviewer in roster orde
 4. **DISPATCH(seat)** (harness-specific), then run the parser (below).
 
 At most **two dispatches** per seat (initial + one retry, for any reason).
+
+**Minimum review:** a run needs at least one successful external reviewer. If every reviewer was skipped or failed, stop before integration and say "no external review"; never present the draft as reviewed. List every skipped or failed seat, with its reason, at the top of the final output. One reviewer failing (for example a Gemini quota error) never blocks the others.
 
 ## Envelope parser
 

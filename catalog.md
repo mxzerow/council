@@ -1,8 +1,6 @@
 # Council model catalog (Cursor Task seats)
 
-Used by the Cursor harness for [Family slug resolve](SKILL.md#family-slug-resolve) and for Reconfigure. The live Task `model` enum is authoritative; this table is a **preference and tie-break list**. **Do not reorder it to mirror a roster:** within a family, row order is the tie-break when version and effort scores are equal (earlier row wins).
-
-Resolve by **provider family** and the seat's `line`, never by exact slug alone. Skip only when no family member is listed (`rejected-family`). Log `family-remap` when the dispatched slug differs from a `pin`. Do not remap across families or lines. Do not retry a slug after Task rejects it.
+Reference for Cursor Task seats. The live Task `model` enum is authoritative and is resolved by `scripts/council_resolve.py` ([core.md](core.md#model-resolution)); at equal version and effort the resolver prefers the plain variant (no `thinking`/`fast`) and then the enum's own order. This table only documents the slugs seen and the default roster's choices.
 
 | Label | `model` slug | Family | Line | Notes |
 |-------|--------------|--------|------|-------|

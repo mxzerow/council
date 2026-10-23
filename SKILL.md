@@ -76,7 +76,7 @@ The integration stage is **not** a review, so it is never skipped by this rule (
 
 This is the only logic that differs from Claude Code. For each seat core.md says to dispatch:
 
-1. **Resolve the model** with [Family slug resolve](#family-slug-resolve). If no family member is on the Task enum, skip the seat (`rejected-family`).
+1. **Resolve the model** per [Model resolution](#model-resolution-cursor). If it returns `skip`, skip the seat (`rejected-family`).
 2. **Prompt:** a short pointer. Include the fields core.md's Cascade loop lists, the absolute packet paths, and the output path `<run>\seat-<n>-reply.txt`. Do **not** paste `artifact.md` or skill file bodies into the Task prompt.
 3. **Call:** `Task` with `subagent_type: generalPurpose`, `model` = the resolved slug, `run_in_background: false`.
 4. **Read-only:** tell the seat not to Write, Edit or Delete anything in the workspace, with one exception: it writes its envelope to `<run>\seat-<n>-reply.txt` and replies with a short acknowledgement only. If the file is missing afterwards (the Task returned the envelope as text), save the returned text to that file yourself. **Unverified in Cursor:** whether Task seats can write there and keep full replies out of the conversation; if they cannot, the context saving applies to Claude Code only.
@@ -87,25 +87,9 @@ This is the only logic that differs from Claude Code. For each seat core.md says
 
 **Integration stage:** dispatch as a Task seat with family `claude`, line `opus` (resolved like any seat), or run it yourself when the chat model is already Opus. If the chat model is not Opus and no Opus Task model is available, warn the user that the draft and integration are not Opus-grade.
 
-### Family slug resolve
+### Model resolution (Cursor)
 
-Task seats match **provider family**, not an exact slug. Opus 5 Extra High and Sonnet Medium are the same seat family (`claude`).
-
-A seat has no slug. Use `family` directly. Treat the seat's `line` and `effort` as the configured tokens; a `pin` is the configured slug and is dispatched verbatim when listed. Never pick a candidate from a different `line`.
-
-1. `inherit` is never a reviewer candidate.
-2. Collect Task `model` enum values with that same family.
-3. If that set is empty → skip. `failures.md` reason `rejected-family`. One line to the user. Do **not** try a different family.
-4. If a `pin` (or exact slug) is in the set → dispatch it.
-5. Otherwise pick one candidate:
-   - Keep candidates that contain the seat's `line` token. If none do, skip (`rejected-family`); never cross lines.
-   - Prefer the **highest** version number among them (`5.5` over `5`, `4.6` over `4.5`).
-   - Then score shared hyphen-separated tokens with the `effort` (`high`, `medium`, `thinking`, …). Highest score wins.
-   - Tie-break: [catalog.md](catalog.md) table order, then Task enum order.
-6. If the dispatched slug differs from a `pin`, append `failures.md` with reason `family-remap` (`wanted <pin>, dispatched <enum-slug>`). That is **not** a skip.
-7. If the call is rejected, skip `rejected-slug` and **do not** try another candidate.
-
-Do **not** reorder the [catalog.md](catalog.md) table to mirror roster order; it is the family-remap tie-break.
+Write the Task `model` enum, one slug per line, to `<run>\task-models.txt`, then resolve each seat per [core.md](core.md#model-resolution) with `--source file:<run>\task-models.txt` (state file `<runs_dir>\_resolved.json`). The script picks the newest version of the seat's family and line; it never crosses lines. If it returns `skip` (`no-line-match` or `no-catalog`), skip the seat (`rejected-family`) and say why. If a Task call is rejected, follow core.md's rejection flow once; never loop through candidates. Write `seat-<n>-<dispatched-slug>.md` with the slug actually passed to Task.
 
 ## Return (Cursor)
 

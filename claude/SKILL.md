@@ -47,36 +47,16 @@ Cost: Codex CLI seats use ChatGPT/Codex quota when `codex login status` reports 
 4. Confirm, unless already decided:
    - `proceed` in the message → run
    - `configure`/`reconfigure` → [Reconfigure](#reconfigure)
-   - A [runtime model override](#runtime-model-override-optional) in the message → use it for this run only
+   - A [runtime override](#runtime-override) in the message → use it for this run only
    - Otherwise one `AskUserQuestion` call with two questions: roster choice (**Proceed** / **Reconfigure, then run** / **Reconfigure only**) and, if `show_exchange: ask`, whether to include the full exchange.
 
-### Latest-in-family upgrade (every run, before showing the roster)
+### Model resolution (Claude Code)
 
-A seat stores `family` + `line` + `effort`, never a version (a `pin` is the exception: used verbatim, never upgraded). For each non-skipped seat, resolve to the newest version **within the same family and line**, never across lines (Flash stays Flash, Pro stays Pro, Sol stays Sol; a new line name such as "Argon" is **not** a newer Flash). Keep the seat's `effort` when that version offers it; otherwise take the nearest offered level and say so.
+Before showing the roster, resolve every non-skipped seat per core.md § Model resolution. Sources: `gemini` → `--source agy`, `gpt` → `--source codex`, `grok` → `--source grok`; state file `<runs_dir>\_resolved.json`. Skip a `claude` or `composer` seat before resolving it.
 
-1. Look up the live catalog per family:
-   - `gemini` seats → `agy models` (tab-separated `slug<TAB>label`). Match the line, e.g. line `flash` → highest `gemini-<major>.<minor>-flash-<effort>`; line `argon` → highest `gemini-<n>-argon-<effort>`.
-   - `gpt` seats → `~/.codex/models_cache.json` (read as UTF-8; entries with `visibility` `list`) if present, else the model list from `codex` itself. Same rule (`gpt-<ver>-sol`).
-   - `grok` seats → `agent models` (the Grok CLI on PATH). If no catalog is reachable, skip the seat (never guess a slug).
-2. Compare version tokens numerically (`3.10` > `3.8`), not as strings. If a newer same-line entry exists, use it **for this run** and tell the user in one line (`gemini-3.6-flash-high → gemini-3.8-flash-high`).
-3. Catalog unreachable, or no same-line match → skip the seat and say why (a `pin` is used as written); never guess a slug and never fall back to a different family or line.
-4. Do not write `config.yaml` for this. Offer to persist only through [Reconfigure](#reconfigure).
-5. A runtime override that **names an exact slug** is treated as a `pin` and honored as written; only unpinned seats are resolved.
+### Runtime override
 
-### Runtime model override (optional)
-
-The user may suggest a different roster for this run only, as part of the `/council` invocation itself:
-
-- Freeform: `this time only: Grok then Gemini`, `swap in Sonnet for the last seat`, `skip GPT`
-- Structured: `models: gemini argon, gpt sol` — family + line, or exact slugs
-
-Resolution:
-
-1. Resolve each named model as a seat (`family` + `line`, e.g. `gemini argon`, `gpt sol`) against the live catalog per Latest-in-family, or as an exact slug (then treated as a `pin`; check `agy models` or the recipe's catalog command). Not found → tell the user it isn't resolvable; leave that seat out of this run rather than guessing a slug.
-2. An override **replaces** the roster for this run, in the order given — unless the request is clearly additive ("also run Gemini", "add a Grok pass"), in which case append to the default roster instead.
-3. [Same-model skip](#same-model-skip-claude-code) still applies — naming a Claude-family model in an override does not bypass it.
-4. Never write `config.yaml` for a one-shot override. Only persist via [Reconfigure](#reconfigure), and only when the user says to save.
-5. No override in the message → use `config.yaml`'s roster unchanged.
+Shared: core.md § Runtime override. Claude Code resolves override names with `--source agy|codex|grok` by family.
 
 ## Seat 0 and the run folder (Claude Code)
 
@@ -122,7 +102,7 @@ Shared: core.md § Return. If the full exchange was requested, append the transc
 
 `config.yaml` is shared with Cursor — edits here change both orchestrators' rosters (the single `seats:` list). When persisting, preserve `role: breadth-auditor` on Gemini unless the user explicitly removes it.
 
-1. The live catalogs (`agy models`, `~/.codex/models_cache.json`, `agent models`) are the source of truth for available models; list them for the user.
+1. Show what the live catalogs offer with `python -I scripts/council_resolve.py list --source agy|codex|grok [--family F]`.
 2. Ask seat count (minimum 1), then for each seat in order: `family`, `line`, `effort`, optional `role`. GPT is dispatched through the **Codex CLI** here.
 3. Probe **that seat's transport** (its recipe's preflight) before accepting (`agy` vs `codex` vs Grok CLI independently). On failure, ask whether to keep it anyway or pick something else. Default `role: breadth-auditor` for the first Gemini seat.
 4. Ask whether to persist (writes the shared `config.yaml`) and the `show_exchange` default.

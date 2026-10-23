@@ -37,7 +37,7 @@ import time
 from datetime import date, datetime
 
 FAMILIES = ("gemini", "gpt", "claude", "grok", "composer")
-EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]   # `-none` / `-minimal` slugs exist (Cursor, Gemini 3.6)
 # Modifier tokens never name a line. Plain variants win over these at equal version.
 MODS = {"thinking", "fast", "latest", "preview", "beta", "alpha", "exp", "experimental", "rc"}
 COOLDOWN_DAYS = 7
@@ -117,7 +117,9 @@ def catalog(source):
         elif source.startswith("file:"):
             with open(source[5:], "rb") as f:
                 text = f.read().decode("utf-8", errors="replace")
-            slugs = [ln.split("\t")[0].strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+            # one slug per line; `slug<TAB>label` and `slug - label` (cursor-agent --list-models) both work.
+            # Prose lines such as "Available models" start with a capital and are ignored.
+            slugs = [m.group(1) for m in re.finditer(r"^[ \t]*([a-z0-9][a-z0-9.\-]*)(?=\s|$)", text.replace("\r\n", "\n"), re.M)]
         else:
             raise UsageError(f"unknown source {source!r}")
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as e:
@@ -219,8 +221,12 @@ def vstr(v):
 
 # ------------------------------------------------------------------ resolve
 def effort_distance(want, have):
-    if want is None or have is None:
+    """0 = exact. A slug with no effort (e.g. gpt-6.1-sol, effort is a flag) is acceptable but
+    loses to an exact match; otherwise nearer is better, and the lower of two equals wins."""
+    if want is None:
         return 0
+    if have is None:
+        return 1
     return abs(EFFORTS.index(want) - EFFORTS.index(have)) * 2 + (1 if EFFORTS.index(have) > EFFORTS.index(want) else 0)
 
 

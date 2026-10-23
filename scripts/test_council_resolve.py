@@ -175,6 +175,60 @@ class Sources(Env):
         self.assertNotIn("claude", out.getvalue())
 
 
+class CursorListing(Env):
+    """`cursor-agent --list-models` prints `slug - Label` lines under a header (seen 2026-10-23)."""
+    LISTING = ("Loading models…\r\nAvailable models\r\n\r\n"
+               "composer-2.5 - Composer 2.5\r\n"
+               "claude-opus-5-thinking-high - Claude Opus 5 1M Thinking\r\n"
+               "claude-opus-5-5-medium - Claude Opus 5.5 1M\r\n"
+               "claude-opus-5-5-medium-fast - Claude Opus 5.5 1M Fast\r\n"
+               "claude-opus-5-5-high - Claude Opus 5.5 1M High\r\n"
+               "gpt-5.6-sol-high - GPT-5.6 Sol 1M High\r\n"
+               "gpt-5.6-sol-none - GPT-5.6 Sol 1M None\r\n"
+               "gpt-5.6-sol-none-fast - GPT-5.6 Sol 1M None Fast\r\n"
+               "gpt-5.6-sol-medium - GPT-5.6 Sol 1M\r\n"
+               "gpt-5.6-sol-medium-fast - GPT-5.6 Sol 1M Fast\r\n"
+               "gemini-3.6-flash-minimal - Gemini 3.6 Flash Minimal\r\n"
+               "gemini-4-argon-medium - Gemini 4 Argon Medium\r\n"
+               "gemini-3.8-flash-medium - Gemini 3.8 Flash Medium\r\n"
+               "gemini-3.7-flash-high - Gemini 3.7 Flash\r\n"
+               "cursor-grok-4.6-high-fast - Grok 4.6 Fast\r\n\r\nTip: use /model to switch\r\n")
+
+    def src(self):
+        p = os.path.join(self.d, "task-models.txt")
+        with open(p, "wb") as f:
+            f.write(self.LISTING.encode("utf-8"))
+        return "file:" + p
+
+    def test_listing_format_is_parsed(self):
+        slugs = cr.catalog(self.src())
+        self.assertIn("gemini-4-argon-medium", slugs)
+        self.assertNotIn("Available", " ".join(slugs))
+        self.assertTrue(all(" " not in s for s in slugs))
+
+    def test_default_lineup_resolves_from_the_cursor_listing(self):
+        for fam, line, eff, want in [("gemini", "argon", "medium", "gemini-4-argon-medium"),
+                                     ("gemini", "flash", "medium", "gemini-3.8-flash-medium"),
+                                     ("claude", "opus", "medium", "claude-opus-5-5-medium"),   # 5.5 beats 5; plain beats -fast
+                                     ("gpt", "sol", "medium", "gpt-5.6-sol-medium")]:
+            code, r = self.run_cli("resolve", "--family", fam, "--line", line, "--effort", eff, "--source", self.src(), "--state", self.state)
+            self.assertEqual(r["slug"], want, (fam, line))
+
+
+class EffortWords(Env):
+    def test_none_and_minimal_are_efforts_not_lines(self):
+        self.assertEqual(cr.parse_slug("gpt-5.6-sol-none")["effort"], "none")
+        self.assertEqual(cr.parse_slug("gemini-3.6-flash-minimal")["effort"], "minimal")
+        self.assertEqual(cr.parse_slug("gpt-5.6-sol-none")["line"], "sol")
+
+    def test_exact_effort_beats_an_effortless_or_none_slug(self):
+        r = self.resolve("gpt", "sol", "medium", ["gpt-5.6-sol-none", "gpt-5.6-sol", "gpt-5.6-sol-medium"])
+        self.assertEqual(r["slug"], "gpt-5.6-sol-medium")
+        # but an effortless slug still beats a far-away explicit effort
+        r = self.resolve("gpt", "sol", "medium", ["gpt-5.6-sol-max", "gpt-5.6-sol"])
+        self.assertEqual(r["slug"], "gpt-5.6-sol")
+
+
 class Classify(unittest.TestCase):
     def test_classes(self):
         cases = {

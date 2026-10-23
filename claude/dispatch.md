@@ -145,10 +145,12 @@ status reports `Logged in using ChatGPT`, ChatGPT/Codex quota applies. For
 API-key automation, use only what the installed CLI documents (`OPENAI_API_KEY`
 with `codex login --with-api-key`).
 
-## Envelope parsing (both seat kinds)
+## Envelope parsing
 
-Look for Council sentinels in the reply text (not `## Gaps` headings — those are
-prose, not machine markers). Recognized sentinels:
+Parsing is done by `scripts/council_parse.py` (core.md § Envelope parser); do not
+parse replies by hand. Pass it the raw reply file: plain text, the Codex `-o`
+last-message file, or the Grok CLI JSON (`.text` is unwrapped automatically).
+Sentinel grammar for reference:
 
 ```text
 <<<COUNCIL_STATUS>>>
@@ -162,27 +164,6 @@ prose, not machine markers). Recognized sentinels:
 <<<COUNCIL_END>>>
 ```
 
-`<<<COUNCIL_STATUS>>>` is required by the shared contract when prior gap IDs
-exist. Find the **first** Council sentinel of any kind
-(`<<<COUNCIL_STATUS>>>`, `<<<COUNCIL_GAPS>>>`, …) and discard only text
-**before** that sentinel. Do **not** search for `<<<COUNCIL_GAPS>>>` first and
-drop a preceding STATUS block.
-
-`<<<COUNCIL_REVISED>>>` and `<<<COUNCIL_END>>>` must both be present. Anything after
-`<<<COUNCIL_END>>>` is not part of the artifact — discard it.
-
-**Identity:** if the Revised body, trimmed and compared case-insensitively, is
-exactly `UNCHANGED`, treat the artifact as unchanged (copy the pre-seat
-`artifact.md`). Empty Revised, a missing Revised marker, or a missing closer is
-**malformed**, not identity — consume the single parse retry. `UNCHANGED` plus
-ordinary `addressed` on an **open** ID is illegal identity (`addressed (pre-existing)`
-is the legal identity close).
-
-**Observed in testing:** a seat can still emit a sentence or two of preamble
-before the first sentinel even though the contract says not to. That is not a
-parse failure — strip the preamble; only treat the seat as failed if no
-Council sentinel appears at all, or the Revised section is empty/missing
-without a legal `UNCHANGED` token.
-
-For Codex seats, apply the same sentinel rules to the contents of the fresh
-`-o` last-message file.
+A sentence or two of preamble before the first sentinel is stripped, not an
+error (observed with Grok and Gemini). `<<<COUNCIL_REVISED>>>` and
+`<<<COUNCIL_END>>>` must both be present; anything after the last END is discarded.

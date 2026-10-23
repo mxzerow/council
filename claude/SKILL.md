@@ -187,7 +187,7 @@ must not skip `agy`/`codex` seats, and vice versa.
 
 For each non-skipped reviewer in roster order:
 
-1. Refresh `artifact.md`, `gaps.md`, `open-gaps.md`, `verdicts.md`, `unresolved.md` on disk.
+1. Get the open blocking IDs: `python -I scripts/council_parse.py open-ids --run <run>` (run from the shared root). The packet files are rendered by the parser after every seat.
 2. Write `seat-<n>-prompt.md`: seat index, label, total seats, run mode,
    **family**, **role** (from config when present), **open blocking IDs**,
    absolute packet paths (**never** `meta.md`; omit placeholder files), and the
@@ -205,29 +205,15 @@ For each non-skipped reviewer in roster order:
    **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, or
    `cli-preflight-codex`) — a failed probe in one transport must never skip
    either of the other two.
-5. Parse the reply per [dispatch.md](dispatch.md) envelope rules (recognize
-   `<<<COUNCIL_STATUS>>>` — do not drop text before Gaps when STATUS is present).
-   For Codex, parse from the fresh `-o` last-message file.
-   - Legal identity: Revised body is exactly `UNCHANGED` (trimmed, case-insensitive)
-     with both `<<<COUNCIL_REVISED>>>` and `<<<COUNCIL_END>>>` present. Resolve to
-     the pre-seat artifact. Missing/empty Revised or missing closer is malformed,
-     not identity.
-   - Missing envelope, empty Revised, patch list, or illegal identity
-     (`UNCHANGED` plus ordinary `addressed` on an open ID) → retry once with
-     "return only the Council envelope." Identity plus `addressed (pre-existing)`
-     is legal.
-   - Still unparseable → keep last good `artifact.md`, log to `failures.md`, continue.
-     Do not apply closing statuses from a failed Revised. Never a third dispatch.
-   - Success → write raw reply to `seat-<n>-<slug>.md`; persist identity or replace
-     `artifact.md` with the Revised section; append Gaps to `gaps.md` under
-     `### Seat <n> — <label>` (`optional:` vs blocking default); append Unresolved
-     the same way (or `- none`); update `verdicts.md`; rebuild `open-gaps.md`.
-   - If `role: breadth-auditor` and Gaps is non-empty, mint IDs so later seats
-     must STATUS blocking ones. Remember leftover (never-addressed) breadth IDs for Return.
-6. **Dissent check:** every **open blocking** ID must appear in STATUS. Restore
-   missing blocking IDs under `### Orchestrator — restored`. Missing optional IDs
-   do not fail the check. Closed IDs inherit unless the seat reopens them. If one
-   vanished from both STATUS and unresolved, restore it and mention it at Return.
+5. Save the raw reply to `seat-<n>-<slug>.md` (Codex: the fresh `-o` file) and run
+   `python -I scripts/council_parse.py parse --run <run> --seat <n> --label "<label>"
+   --reply <file> [--role <role>]`. Read **only** its one-line JSON summary. On exit 3
+   (malformed) or 4 (illegal identity) retry once with "return only the Council
+   envelope", then re-run with `--final-attempt`; never a third dispatch. The parser
+   mints IDs, applies STATUS, restores missing blocking IDs (the dissent check),
+   updates `artifact.md`, and rebuilds `gaps.md`, `open-gaps.md`, `verdicts.md` and
+   `unresolved.md` — see core.md § Envelope parser. If `role: breadth-auditor` and
+   it minted blocking gaps, remember never-addressed breadth IDs for Return.
 
 Do not create a local roster or copy shared role rules into this folder.
 

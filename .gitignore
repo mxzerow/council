@@ -7,3 +7,4 @@ last-exchange.md
 *.local.yml
 .DS_Store
 Thumbs.db
+__pycache__/

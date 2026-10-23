@@ -83,26 +83,26 @@ class Env(unittest.TestCase):
 
 class Masking(unittest.TestCase):
     def test_round_trip_is_exact(self):
-        masked, table = rw.mask(DOC)
+        masked, table, prefix = rw.mask(DOC)
         self.assertEqual(rw.unmask(masked, table), DOC)
         self.assertGreater(len(table), 8)
 
     def test_protected_spans_are_hidden(self):
-        masked, _ = rw.mask(DOC)
+        masked, _, _ = rw.mask(DOC)
         for secret in ("https://example.com", "D:\\Documents", "scripts/foo.py", "G1-2", "4ca9526e", "def f()", "| a | 1 |", "inline code", '"a quoted phrase"'):
             self.assertNotIn(secret, masked, secret)
         self.assertIn("The retry limit is 3", masked)              # prose and numbers stay visible
         self.assertIn("## First section", masked)                   # headings stay visible
 
     def test_trailing_sentence_punctuation_stays_outside_the_span(self):
-        masked, table = rw.mask("Compare counters/errors. See https://example.com/x, then scripts/a.py; done (see core.md).")
+        masked, table, prefix = rw.mask("Compare counters/errors. See https://example.com/x, then scripts/a.py; done (see core.md).")
         self.assertEqual(sorted(table.values()), sorted(["counters/errors", "https://example.com/x", "scripts/a.py", "core.md"]))
         self.assertRegex(masked, r"@@P\d+@@\. See @@P\d+@@, then @@P\d+@@; done \(see @@P\d+@@\)\.")
         self.assertEqual(rw.unmask(masked, table), "Compare counters/errors. See https://example.com/x, then scripts/a.py; done (see core.md).")
 
     def test_nested_placeholders_restore(self):
         text = 'He said "run `make all` now" twice.'
-        masked, table = rw.mask(text)
+        masked, table, prefix = rw.mask(text)
         self.assertEqual(rw.unmask(masked, table), text)
 
     def test_real_files_round_trip_and_chunk_losslessly(self):
@@ -113,14 +113,14 @@ class Masking(unittest.TestCase):
                 continue
             with open(p, encoding="utf-8") as f:
                 text = f.read().replace("\r\n", "\n")
-            masked, table = rw.mask(text)
-            self.assertEqual(rw.unmask(masked, table), text, name)
-            self.assertEqual("".join(rw.make_chunks(masked, 6000)), masked, name)
+            masked, table, prefix = rw.mask(text)
+            self.assertEqual(rw.unmask(masked, table, prefix), text, name)
+            self.assertEqual("".join(rw.make_chunks(masked, 6000, prefix)), masked, name)
 
 
 class Chunking(unittest.TestCase):
     def test_h2_split_and_preamble(self):
-        masked, _ = rw.mask(DOC)
+        masked, _, _ = rw.mask(DOC)
         chunks = rw.make_chunks(masked, 120)
         self.assertGreater(len(chunks), 2)
         self.assertEqual("".join(chunks), masked)
@@ -163,13 +163,13 @@ class Checks(Env):
 
     def test_missing_extra_and_duplicate_placeholders(self):
         import re
-        first = rw.PH.search(self.src).group(0)
+        first = rw.ph_re("@@P").search(self.src).group(0)
         self.assertTrue(any(r.startswith("placeholders") for r in self.c(self.src.replace(first, "", 1))))
         self.assertTrue(any(r.startswith("placeholders") for r in self.c(self.src + " " + first)))
         self.assertTrue(any(r.startswith("placeholders") for r in self.c(self.src + " @@P9999@@")))
 
     def test_placeholder_order_may_change(self):
-        a, b = list(rw.PH.finditer(self.src))[:2]
+        a, b = list(rw.ph_re("@@P").finditer(self.src))[:2]
         swapped = self.src.replace(a.group(0), "@@TMP@@").replace(b.group(0), a.group(0)).replace("@@TMP@@", b.group(0))
         self.assertEqual(self.c(swapped), [])
 
@@ -208,7 +208,7 @@ class Checks(Env):
 
     def test_negation_loss_fails(self):
         out = self.src.replace("must never write", "writes").replace("Do not skip", "Skip").replace("unless", "if")
-        self.assertTrue(any(r.startswith("negations_or_qualifiers_lost") for r in self.c(out)))
+        self.assertTrue(any(r.startswith(("negations_lost", "qualifiers_lost")) for r in self.c(out)))
 
     def test_length_bounds(self):
         self.assertTrue(any(r.startswith("length_ratio") for r in self.c("## First section\n\nshort")))
@@ -273,12 +273,13 @@ class Flow(Env):
         for keep in ("https://example.com/a?b=1", "D:\\Documents\\x\\y.py", "G1-2", "def f():", "| a | 1 |", '"a quoted phrase"'):
             self.assertIn(keep, text)
 
-    def test_crlf_artifact_is_normalized(self):
+    def test_crlf_artifact_keeps_its_line_endings(self):
         self.write("artifact.md", DOC.replace("\n", "\r\n"))
         self.prepare(max_chars=100000)
         self.assertEqual(self.reply(1, self.identity_reply(1))[1]["status"], "ok")
         self.cli("assemble", "--run", self.run)
-        self.assertEqual(self.read("artifact.md"), DOC)
+        with open(os.path.join(self.run, "artifact.md"), "rb") as f:
+            self.assertEqual(f.read(), DOC.replace("\n", "\r\n").encode("utf-8"))   # original line endings kept
 
     def test_errors_exit_2(self):
         self.assertEqual(self.cli("assemble", "--run", self.run)[0], 2)                      # no plan

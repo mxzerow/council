@@ -194,5 +194,108 @@ class Classify(unittest.TestCase):
         self.assertNotEqual(cr.classify_text("429 quota exceeded for model gpt-6.1-sol"), "model-rejected")
 
 
+class CodexReview(Env):
+    """Regression tests for the Codex review of 2026-10-23 (resolver)."""
+
+    def test_auth_and_quota_with_model_context_are_not_model_rejected(self):
+        self.assertEqual(cr.classify_text("401: model gpt-6.1-sol: invalid API key"), "auth")
+        self.assertEqual(cr.classify_text("429: model gpt-6.1-sol not available: quota exceeded"), "quota")
+        self.assertEqual(cr.classify_text("ERROR: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account"), "model-rejected")
+
+    def test_date_suffix_does_not_override_version(self):
+        for dated in ("gpt-6-sol-20261001", "gpt-6-sol-2026-10-01", "gpt-6-sol-261001"):
+            r = self.resolve("gpt", "sol", "high", [dated, "gpt-6.1-sol"])
+            self.assertEqual(r["slug"], "gpt-6.1-sol", dated)
+
+    def test_concurrent_state_updates_survive(self):
+        import threading
+        errors = []
+
+        def work(i):
+            try:
+                if i % 2:
+                    cr.main(["mark-good", "--key", f"gemini/argon/k{i}", "--slug", f"gemini-4-argon-s{i}", "--state", self.state])
+                else:
+                    cr.main(["mark-rejected", "--slug", f"gpt-6.{i}-sol", "--state", self.state, "--today", "2026-10-23"])
+            except Exception as e:  # pragma: no cover
+                errors.append(e)
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            threads = [threading.Thread(target=work, args=(i,)) for i in range(16)]
+            [t.start() for t in threads]
+            [t.join() for t in threads]
+        self.assertEqual(errors, [])
+        with open(self.state, encoding="utf-8") as f:
+            st = json.load(f)
+        self.assertEqual(len(st["last_good"]), 8)
+        self.assertEqual(len(st["rejected"]), 8)
+        self.assertFalse(os.path.exists(self.state + ".lock"))
+
+    def test_nonzero_catalog_exit_uses_last_good(self):
+        old = cr.run_cli
+
+        def failing(names, args):
+            raise cr.UsageError("agy exited 1: authentication failed")
+
+        cr.run_cli = failing
+        try:
+            self.run_cli("mark-good", "--key", "gemini/argon/medium", "--slug", "gemini-4-argon-medium", "--state", self.state)
+            code, r = self.run_cli("resolve", "--family", "gemini", "--line", "argon", "--effort", "medium", "--source", "agy", "--state", self.state)
+        finally:
+            cr.run_cli = old
+        self.assertEqual((r["status"], r["from"], r["slug"]), ("ok", "last_good", "gemini-4-argon-medium"))
+
+    def test_run_cli_nonzero_exit_raises(self):
+        import sys
+        old = cr.shutil.which
+        cr.shutil.which = lambda n: sys.executable
+        try:
+            with self.assertRaises(cr.UsageError):
+                cr.run_cli(["agy"], ["-c", "import sys; sys.stderr.write('authentication failed'); sys.exit(1)"])
+        finally:
+            cr.shutil.which = old
+
+    def test_empty_catalog_is_unreachable_not_no_line_match(self):
+        code, r = self.run_cli("resolve", "--family", "gemini", "--line", "argon", "--source", self.catalog_file([]), "--state", self.state)
+        self.assertEqual((r["status"], r["reason"]), ("skip", "no-catalog"))
+
+    def test_equivalent_versions_choose_exact_effort(self):
+        r = self.resolve("claude", "opus", "high", ["claude-opus-5-high", "claude-opus-5.0-low"])
+        self.assertEqual(r["slug"], "claude-opus-5-high")
+
+    def test_release_suffix_preserves_line(self):
+        for suffix in ("latest", "preview", "beta"):
+            p = cr.parse_slug(f"grok-4.7-{suffix}")
+            self.assertEqual((p["line"], p["version"]), ("grok", (4, 7)), suffix)
+        r = self.resolve("grok", "grok", None, ["grok-4.7-latest"])
+        self.assertEqual(r["slug"], "grok-4.7-latest")
+
+    def test_stable_beats_preview_at_equal_version(self):
+        r = self.resolve("gemini", "flash", "high", ["gemini-3.8-flash-high-preview", "gemini-3.8-flash-high"])
+        self.assertEqual(r["slug"], "gemini-3.8-flash-high")
+
+    def test_invalid_state_and_catalog_structures(self):
+        for bad in ("[]", '{"rejected": [], "last_good": {}}', '{"rejected": {}, "last_good": []}', '{"rejected": {"x": 5}}'):
+            with open(self.state, "w", encoding="utf-8") as f:
+                f.write(bad)
+            code, _ = self.run_cli("resolve", "--family", "gpt", "--line", "sol", "--source", self.catalog_file(["gpt-6-sol"]), "--state", self.state)
+            self.assertEqual(code, 2, bad)
+        home = os.path.join(self.d, "home2")
+        os.makedirs(os.path.join(home, ".codex"))
+        with open(os.path.join(home, ".codex", "models_cache.json"), "w", encoding="utf-8") as f:
+            f.write('{"models": null}')
+        old = os.environ.get("USERPROFILE"), os.environ.get("HOME")
+        os.environ["USERPROFILE"] = os.environ["HOME"] = home
+        try:
+            with self.assertRaises(cr.UsageError):
+                cr.catalog("codex")
+        finally:
+            for k, v in zip(("USERPROFILE", "HOME"), old):
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
 if __name__ == "__main__":
     unittest.main()

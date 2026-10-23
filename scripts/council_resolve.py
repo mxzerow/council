@@ -25,6 +25,7 @@ Sources (--source)
 Exit codes: 0 ok / skip (read the JSON `status`), 2 usage or IO error.
 """
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -32,12 +33,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import date, datetime
 
 FAMILIES = ("gemini", "gpt", "claude", "grok", "composer")
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
-MODS = {"thinking", "fast"}
+# Modifier tokens never name a line. Plain variants win over these at equal version.
+MODS = {"thinking", "fast", "latest", "preview", "beta", "alpha", "exp", "experimental", "rc"}
 COOLDOWN_DAYS = 7
+DATE_TOKEN = re.compile(r"\d{6,8}")  # 261001 / 20261001 release stamps are not versions
 
 
 class UsageError(Exception):
@@ -59,10 +63,18 @@ def parse_slug(slug):
             effort = body[i]
             del body[i]
             break
+    # a trailing 2026-10-01 style date: drop the three tokens
+    if len(body) >= 3 and re.fullmatch(r"20\d\d", body[-3]) and re.fullmatch(r"\d\d", body[-2]) and re.fullmatch(r"\d\d", body[-1]):
+        body = body[:-3]
     nums, alpha = [], []
     for t in body:
+        if DATE_TOKEN.fullmatch(t):
+            continue
         (nums if re.fullmatch(r"\d+(\.\d+)*", t) else alpha).append(t)
-    version = tuple(int(p) for t in nums for p in t.split("."))
+    version = [int(p) for t in nums for p in t.split(".")]
+    while version and version[-1] == 0:  # 5, 5.0 and 5.0.0 are the same version
+        version.pop()
+    version = tuple(version)
     mods = [a for a in alpha if a in MODS]
     lines = [a for a in alpha if a not in MODS]
     return {"slug": slug.strip(), "family": family, "line": lines[0] if lines else family,
@@ -80,31 +92,39 @@ def run_cli(names, args):
         raise UsageError(f"{names[0]} not found on PATH")
     r = subprocess.run([exe, *args], capture_output=True, text=True, encoding="utf-8",
                        errors="replace", stdin=subprocess.DEVNULL, timeout=60)
+    if r.returncode != 0:
+        raise UsageError(f"{names[0]} exited {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}")
     return r.stdout
 
 
 def catalog(source):
-    """Return a list of slugs, or raise UsageError if the catalog is unreachable."""
+    """Return a non-empty list of slugs, or raise UsageError if the catalog is unreachable or empty."""
     try:
         if source == "agy":
-            out = run_cli(["agy"], ["models"])
-            return [m.group(1) for m in re.finditer(r"^([a-z0-9][a-z0-9.\-]*)\t", out, re.M)]
-        if source == "grok":
-            out = run_cli(["agent"], ["models"])
-            return [m.group(1) for m in re.finditer(r"^\s*\*?\s*(grok-[\w.\-]+)", out, re.M)]
-        if source == "codex":
+            out = run_cli(["agy"], ["models"]).replace("\r\n", "\n")
+            slugs = [m.group(1) for m in re.finditer(r"^([a-z0-9][a-z0-9.\-]*)\t", out, re.M)]
+        elif source == "grok":
+            out = run_cli(["agent"], ["models"]).replace("\r\n", "\n")
+            slugs = [m.group(1) for m in re.finditer(r"^\s*\*?\s*(grok-[\w.\-]+)", out, re.M)]
+        elif source == "codex":
             p = os.path.join(os.path.expanduser("~"), ".codex", "models_cache.json")
             with open(p, "rb") as f:
                 data = json.loads(f.read().decode("utf-8", errors="replace"))
-            models = data.get("models", data) if isinstance(data, dict) else data
-            return [m["slug"] for m in models if isinstance(m, dict) and m.get("visibility") == "list" and m.get("slug")]
-        if source.startswith("file:"):
+            models = data.get("models") if isinstance(data, dict) else data
+            if not isinstance(models, list):
+                raise ValueError("models_cache.json has no model list")
+            slugs = [m["slug"] for m in models if isinstance(m, dict) and m.get("visibility") == "list" and isinstance(m.get("slug"), str)]
+        elif source.startswith("file:"):
             with open(source[5:], "rb") as f:
                 text = f.read().decode("utf-8", errors="replace")
-            return [ln.split("\t")[0].strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
-    except (OSError, ValueError, subprocess.SubprocessError, KeyError) as e:
+            slugs = [ln.split("\t")[0].strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+        else:
+            raise UsageError(f"unknown source {source!r}")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as e:
         raise UsageError(f"catalog unreachable ({source}): {e}")
-    raise UsageError(f"unknown source {source!r}")
+    if not slugs:
+        raise UsageError(f"catalog empty ({source})")
+    return slugs
 
 
 # ------------------------------------------------------------------ state
@@ -114,8 +134,15 @@ def load_state(path):
     try:
         with open(path, "rb") as f:
             st = json.loads(f.read().decode("utf-8"))
+        if not isinstance(st, dict):
+            raise ValueError("top level is not an object")
         st.setdefault("rejected", {})
         st.setdefault("last_good", {})
+        if not isinstance(st["rejected"], dict) or not isinstance(st["last_good"], dict):
+            raise ValueError("rejected and last_good must be objects")
+        for slug, rec in st["rejected"].items():
+            if not isinstance(rec, dict) or not isinstance(rec.get("date"), str):
+                raise ValueError(f"bad rejected entry for {slug!r}")
         return st
     except ValueError as e:
         raise UsageError(f"state file is corrupt ({e}): {path}")
@@ -128,11 +155,47 @@ def save_state(path, st):
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(st, indent=2, sort_keys=True) + "\n")
-        os.replace(tmp, path)
+        for attempt in range(20):  # Windows denies the replace while a reader has the target open
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.02)
     except Exception:
         if os.path.exists(tmp):
             os.remove(tmp)
         raise
+
+
+@contextlib.contextmanager
+def state_lock(path, timeout=10.0):
+    """Serialize read-modify-write of the state file across processes and threads."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    lock = path + ".lock"
+    deadline = time.time() + timeout
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except (FileExistsError, PermissionError):  # Windows raises PermissionError while the holder deletes the lock
+            try:
+                if time.time() - os.path.getmtime(lock) > 30:  # stale lock from a crashed process
+                    os.remove(lock)
+                    continue
+            except OSError:
+                pass
+            if time.time() > deadline:
+                raise UsageError(f"state lock busy: {lock}")
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
 
 
 def today_of(a):
@@ -205,28 +268,33 @@ def cmd_resolve(a):
 
 
 def cmd_mark_rejected(a):
-    st = load_state(a.state)
-    st["rejected"][a.slug] = {"date": today_of(a).isoformat(), "reason": a.reason or "model-rejected"}
-    save_state(a.state, st)
+    with state_lock(a.state):
+        st = load_state(a.state)
+        st["rejected"][a.slug] = {"date": today_of(a).isoformat(), "reason": a.reason or "model-rejected"}
+        save_state(a.state, st)
     print(json.dumps({"status": "ok", "rejected": a.slug, "until_days": COOLDOWN_DAYS}))
     return 0
 
 
 def cmd_mark_good(a):
-    st = load_state(a.state)
-    st["last_good"][a.key] = a.slug
-    st["rejected"].pop(a.slug, None)
-    save_state(a.state, st)
+    with state_lock(a.state):
+        st = load_state(a.state)
+        st["last_good"][a.key] = a.slug
+        st["rejected"].pop(a.slug, None)
+        save_state(a.state, st)
     print(json.dumps({"status": "ok", "key": a.key, "slug": a.slug}))
     return 0
 
 
 # ------------------------------------------------------------------ failure classification
+# Order matters: quota and auth are checked BEFORE model-rejected, because their messages
+# often name the model ("401: model gpt-6.1-sol: invalid API key") and must never be cached
+# as a model rejection.
 CLASSES = [
-    ("model-rejected", r"not supported when using codex|model[^\n]{0,60}(not supported|not found|does not exist|unsupported|not available|invalid)"
-                       r"|unsupported model|unknown model|invalid model|no such model"),
     ("quota", r"quota|rate.?limit|\b429\b|resource_exhausted|usage limit|out of credits|insufficient credit|too many requests"),
     ("auth", r"not authenticated|login required|please log ?in|unauthori[sz]ed|\b401\b|invalid api key|authentication (required|failed)|sign in"),
+    ("model-rejected", r"not supported when using codex|model[^\n]{0,60}(not supported|not found|does not exist|unsupported|not available)"
+                       r"|unsupported model|unknown model|invalid model|no such model"),
     ("network", r"econn|etimedout|enotfound|getaddrinfo|network|dns|socket|connection (reset|refused|closed)|tls|certificate"),
     ("timeout", r"timed out|timeout|deadline exceeded"),
 ]

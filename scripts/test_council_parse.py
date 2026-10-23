@@ -30,9 +30,12 @@ class Base(unittest.TestCase):
         with open(reply, "wb") as f:
             f.write(text.encode("utf-8"))
         out = io.StringIO()
+        # Most mechanics tests need a role that may return a changed Revised; reviewer-role
+        # tests pass "--role", "reviewer" explicitly.
+        role = [] if "--role" in extra else ["--role", "integrator"]
         with contextlib.redirect_stdout(out):
             code = cp.main(["parse", "--run", self.run, "--seat", str(seat),
-                            "--label", label or f"S{seat}", "--reply", reply, *extra])
+                            "--label", label or f"S{seat}", "--reply", reply, *role, *extra])
         line = out.getvalue().strip().splitlines()[-1]
         return code, json.loads(line)
 
@@ -255,7 +258,7 @@ class ReviewFindings(Base):
                 with open(reply, "w", encoding="utf-8") as f:
                     f.write(env(status="G1-1: addressed", revised="replacement"))
                 cp.cmd_parse(cp.build_parser().parse_args(
-                    ["parse", "--run", self.run, "--seat", "2", "--label", "S2", "--reply", reply]))
+                    ["parse", "--run", self.run, "--seat", "2", "--label", "S2", "--reply", reply, "--role", "integrator"]))
         finally:
             cp.render_all = real
         self.assertIn("G1-1: open", self.read("verdicts.md"))     # stale derived file...
@@ -297,6 +300,49 @@ class ReviewFindings(Base):
         with open(os.path.join(self.run, "gaps.json"), "w", encoding="utf-8") as f:
             f.write("{not json")
         self.assertEqual(self.cli("open-ids", "--run", self.run)[0], 2)
+
+
+class GapsOnly(Base):
+    """Step 5: reviewers report gaps only; only the integrator may change the artifact."""
+
+    def seed(self):
+        self.parse(1, env(gaps="- blocking: fix bug"), None, "--role", "reviewer")
+
+    def test_reviewer_with_changed_revised_is_malformed_first_time(self):
+        self.seed()
+        code, s = self.parse(2, env(status="G1-1: unresolved", revised="rewritten"), None, "--role", "reviewer")
+        self.assertEqual((code, s["reason"]), (3, "revised_not_allowed"))
+        self.assertIn("gaps-only", s["action"])
+        self.assertEqual(self.read("artifact.md"), "# Plan\nbody\n")
+        self.assertEqual(self.open_ids(), "G1-1")
+
+    def test_breadth_auditor_is_gaps_only_too(self):
+        code, s = self.parse(1, env(revised="rewritten"), None, "--role", "breadth-auditor")
+        self.assertEqual((code, s["reason"]), (3, "revised_not_allowed"))
+
+    def test_final_attempt_ignores_revised_keeps_gaps_and_logs(self):
+        self.seed()
+        code, s = self.parse(2, env(status="G1-1: unresolved", gaps="- blocking: new one", revised="rewritten"),
+                             None, "--role", "reviewer", "--final-attempt")
+        self.assertEqual(code, 0)
+        self.assertEqual(s["revised"], "UNCHANGED")
+        self.assertEqual(self.read("artifact.md"), "# Plan\nbody\n")
+        self.assertEqual(self.open_ids(), "G1-1,G2-1")
+        self.assertIn("revised-not-allowed", self.read("failures.md"))
+
+    def test_integrator_closes_and_rejects_with_reasons(self):
+        self.parse(1, env(gaps="- blocking: a\n- blocking: b\n- optional: c"), None, "--role", "reviewer")
+        code, s = self.parse(2, env(status="G1-1: addressed\nG1-2: rejected - out of scope\nG1-3: addressed",
+                                    unresolved="- G1-2: out of scope", revised="# Plan v2\n"), None, "--role", "integrator")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.read("artifact.md"), "# Plan v2\n")
+        self.assertEqual(self.open_ids(), "G1-2")          # rejected stays open and visible
+        self.assertIn("out of scope", self.read("open-gaps.md"))
+        self.assertIn("G1-2: out of scope", self.read("unresolved.md"))
+
+    def test_reviewer_unchanged_with_gaps_is_fine(self):
+        code, s = self.parse(1, env(gaps="- blocking: x"), None, "--role", "reviewer")
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

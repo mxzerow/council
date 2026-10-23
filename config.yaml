@@ -3,11 +3,6 @@ show_exchange: ask
 # config.local.yaml (gitignored) > this file > default <skill-root>/runs. Omit to use the default.
 # runs_dir: D:\Documents\.council-runs
 max_reviewers: 7
-# churn_guard / terminal_calm_skip: Cursor-only cost guards, removed in unification step 5
-# (see core.md divergence ledger D3). churn_guard: 0 disables both. Gemini seats are never
-# counted or skipped by churn-stop.
-churn_guard: 2
-terminal_calm_skip: false
 cli_timeout_sec: 600
 run_retention_count: 10
 run_retention_days: 14

@@ -2,7 +2,7 @@
 
 Shared cascade logic for both harnesses. This is **not** a skill: it has no front matter and is never invoked directly. Each harness `SKILL.md` (Cursor: `SKILL.md`; Claude Code: `claude/SKILL.md`) reads this file first and adds only what differs: how the shared root is found, the roster key, the Start/confirm tools, and how a seat is **dispatched**.
 
-Council is a **workflow**, not a harness mode. You are the orchestrator: produce the initial answer yourself (unless the user supplied an artifact), then route reviewers **sequentially**. Do not rewrite the last reviewer's artifact unless that seat failed. No parallel first-answers, no anonymized peer review, no chairman synthesis pass.
+Council is a **workflow**, not a harness mode. You are the orchestrator. The lineup is: a draft (seat 0), then reviewers who **report gaps only**, then **one integration pass** that resolves every gap and writes the revision (see [Stages](#stages)). No parallel first-answers, no anonymized peer review, no chairman synthesis pass.
 
 ## What a harness must define
 
@@ -28,15 +28,17 @@ Both harnesses read **one** list, `seats:` in `config.yaml`. A seat names a **mo
 | `role` | no | `reviewer` (default) \| `breadth-auditor` \| `rewriter` |
 | `label` | no | Display name |
 | `pin` | no | Exact slug. Used verbatim; disables version resolution for this seat |
-| `validation_critical` | no | Cursor churn guard only; removed with the churn guard in step 5 |
+
 
 **Roles (strict):** an unrecognized `role` is a config error in **both** harnesses (stop at Start, ask the user to fix `config.yaml`). A typo must never silently turn a seat into a different kind of seat.
 
 | `role` | Meaning |
 |--------|---------|
-| `reviewer` | Full critical reviewer using the inlined [reviewer-envelope.md](reviewer-envelope.md) (default when `role` is absent) |
-| `breadth-auditor` | Also reads [reviewer-prompt.md](reviewer-prompt.md): prefers `UNCHANGED`, reports breadth findings under Gaps |
+| `reviewer` | Critical reviewer, **gaps only**: uses the inlined [reviewer-envelope.md](reviewer-envelope.md); Revised must be exactly `UNCHANGED` (default when `role` is absent) |
+| `breadth-auditor` | A `reviewer` that also reads [reviewer-prompt.md](reviewer-prompt.md) and prioritizes breadth findings (missed requirements, stale claims, edge cases); also gaps only |
 | `rewriter` | Final readability rewrite (step 7). **Accepted by validation but not implemented yet:** until step 7 a `rewriter` seat is skipped with `failures.md` reason `rewriter-not-implemented` |
+
+The integration pass is a **stage**, not a `seats:` entry. The parser knows it as `--role integrator`, the only role allowed to return a changed Revised.
 
 **Transport.** Each harness owns a mapping from `family` to how a seat is called (Cursor: every family through its Task tool; Claude Code: `gemini` through `agy`, `gpt` through the Codex CLI, `grok` through the Grok CLI, `claude` skipped by Same-model skip). A family with no transport in the current harness is **skipped, not an error**: `failures.md` reason `no-transport`, one line to the user.
 
@@ -54,11 +56,11 @@ Step 2 moves shared text here **without changing rules**. Where the two harnesse
 |---|------|--------|-------------|-------------|
 | D1 | Legacy `## Gaps` / `## Revised output` parse fallback | yes | no | **step 4: done** (fallback removed; a reply without sentinels is malformed in both) |
 | D2 | Run retention | yes | no | step 8 |
-| D3 | Churn guard, Terminal calm skip, Breadth-auditor content-loss guard | yes | no | step 5 (removed) |
+| D3 | Churn guard, Terminal calm skip, Breadth-auditor content-loss guard | yes | no | **step 5: done** (removed from both) |
 | D4 | Roster key (`cursor_reviewers` vs `reviewers`), `kind`/`command` | Task only | CLI shell-outs | **step 3: done** (`seats:`; transport mapping stays per harness) |
 | D5 | Latest-in-family upgrade, runtime model override | no | yes | step 6 (shared resolver) |
 | D6 | Exchange handling at Return | writes `exchange.md` + `last-exchange.md` | appends transcript in chat | harness-specific (stays) |
-| D7 | Cascade loop deltas (churn, family slug resolve vs preflight buckets) | in Cursor SKILL.md | in claude/SKILL.md | step 5 |
+| D7 | Cascade loop deltas | in Cursor SKILL.md | in claude/SKILL.md | **step 5: done** (thin files hold only dispatch) |
 | D8 | Seat-0 ID strip, size-check pipeline, implementation apply | defined here | inherited from here | accepted (shared) |
 | D9 | `role` validation | strict | tolerated | **step 3: done** (strict in both) |
 
@@ -101,7 +103,7 @@ Shared mutable contracts: prefer freeze-then-concurrent partitions; if the contr
 
 **Packing rules (every run):** `request.md` = short hints only; `artifact.md` = full review target (not a whole-tree dump); list only paths seats must read; set `review_roots` only for CLI `--add-dir` needs; prefer live disk over packed excerpts; never summarize the codebase into the artifact to “save tokens.” Implementation artifacts should be tighter than prose (hot paths / changed files only; path-fenced bodies).
 
-Do **not** silently digest or RAG-chunk `artifact.md` as a token optimizer. Packet hygiene (open-gaps, path prompts, envelopes, churn/same-model skip) is the approved compression.
+Do **not** silently digest or RAG-chunk `artifact.md` as a token optimizer. Packet hygiene (open-gaps, path prompts, envelopes, gaps-only reviewers, same-model skip, the parser summary) is the approved compression.
 
 ## Produce the draft (seat 0)
 
@@ -131,7 +133,7 @@ Create `<runs_dir>\<yyyy-mm-ddTHH-MM-SS>\` (colon-free timestamp; absolute path;
 | `open-gaps.md` | Generated packet: full text of currently open claims (omit when none are open). Ordinary seats read this, not `gaps.md` |
 | `verdicts.md` | Latest verdict and tier per minted ID (`addressed` \| `unresolved` \| `rejected`; `blocking` \| `optional`). Generated by the parser |
 | `gaps.json` | Machine state written only by [the parser](#envelope-parser): every minted gap (tier, text, status, per-seat history) and a per-seat log. `gaps.md`, `open-gaps.md`, `verdicts.md` and `unresolved.md` are rendered from it |
-| `seat-<n>-revised.md` | A Revised held back by `--hold-artifact` until `apply` (used by Cursor's content-loss guard) |
+| `seat-<n>-revised.md` | A Revised held back by `--hold-artifact` until `apply` (for stages that need a check before acceptance) |
 | `unresolved.md` | **Cumulative** dissent log (append; never wipe prior seats). Omit from reviewer Read lists while it is only the init `none` placeholder |
 | `meta.md` | Seat-0 family, run mode (`review-only` \| `implementation`), skill root absolute path, optional `review_roots` (extra dirs for CLI `--add-dir`). **Orchestrator only — never in reviewer Read lists** |
 | `failures.md` | Skips and failures (seat, reason) |
@@ -174,18 +176,28 @@ Normalize: lowercase; strip digits and dotted versions; map synonyms (`chatgpt`�
 
 If seat 0 family is `unknown`, do not same-model-skip.
 
-## Cascade loop (common steps)
+## Stages
+
+1. **Seat 0 — draft.** The orchestrator model writes the draft, or the user supplies one ([Produce the draft](#produce-the-draft-seat-0)). Prefer Opus for this seat.
+2. **Review, gaps only.** Every `seats:` entry with role `reviewer` or `breadth-auditor` runs in roster order. A reviewer **never changes the artifact**: its Revised is exactly `UNCHANGED` and every change it wants goes under Gaps as `blocking:` or `optional:`. It STATUSes each open blocking ID: `unresolved` (still real), `rejected — why` (it disagrees), or `addressed (pre-existing)` (the artifact already satisfies it). Reviewers all see the same draft; later reviewers also see earlier gaps.
+3. **Integrate, once.** After the last reviewer, if any gap is open (blocking or optional), one integration pass runs.
+   - **Who:** the orchestrator itself when it is Opus; otherwise an Opus seat (Claude Code: the `planner` agent; Cursor: an Opus Task seat). Same-model skip does **not** apply: the integrator is the author's family on purpose, and the other families' gaps are what it is judged against.
+   - **Brief (paths only):** `request.md`, `artifact.md`, `open-gaps.md` (full text, latest status and reasons), `unresolved.md`, the inlined envelope, and this addendum: *You may return a changed Revised. STATUS every open gap ID, blocking and optional: `addressed` (you incorporated it), `rejected — reason`, or `unresolved` only for something you cannot decide. List each rejection under Unresolved. Return the complete replacement artifact, or `UNCHANGED` if every gap is rejected or already satisfied. Mint new gaps only for problems you introduce or find while integrating.*
+   - **Parse** with `--role integrator`. Retry and dispatch-budget rules are the same as for any seat.
+   - **Audit:** every gap the integrator rejects or leaves unresolved is printed at Return with its reason, so the author's own bias can be checked without opening run files.
+   - If no gap is open after review, skip this stage; the draft is the result.
+4. **Rewrite (step 7, not implemented).** A `rewriter` seat is skipped (`rewriter-not-implemented`).
+
+## Cascade loop
 
 Seats run **one after another**; never in parallel. For each reviewer in roster order:
 
-1. Apply [Same-model skip](#same-model-skip) and the harness's other skip rules.
+1. Apply [Same-model skip](#same-model-skip) and the roster rules (`no-transport`, `rewriter-not-implemented`).
 2. Get the **open blocking IDs** with `python -I scripts/council_parse.py open-ids --run <run>` (blocking IDs whose latest verdict is not `addressed`; `rejected` and `unresolved` stay open). The packet files are already current because the parser renders them after every seat.
-3. Build the seat prompt: seat index, label, total seats, run mode, seat kind, resolved family, configured role, open blocking IDs (comma-separated, not prose), absolute packet paths (never `meta.md`, never placeholder-only files), and the inlined [reviewer-envelope.md](reviewer-envelope.md) (breadth-auditor and implementation seats also Read [reviewer-prompt.md](reviewer-prompt.md)). Never paste `artifact.md` into an argv or Task prompt.
-4. **DISPATCH(seat)** (harness-specific), then [Parse and retry](#parse-and-retry) and [After a successful parse](#after-a-successful-parse).
+3. Build the seat prompt: seat index, label, total seats, run mode, resolved family, configured role, open blocking IDs (comma-separated, not prose), absolute packet paths (never `meta.md`, never placeholder-only files), and the inlined [reviewer-envelope.md](reviewer-envelope.md) (a `breadth-auditor` also Reads [reviewer-prompt.md](reviewer-prompt.md)). Never paste `artifact.md` into an argv or Task prompt. Say plainly that the seat is **gaps only**.
+4. **DISPATCH(seat)** (harness-specific; see the harness file), then [Parse and retry](#parse-and-retry) and [After a successful parse](#after-a-successful-parse).
 
 Each seat gets **at most two dispatches** (initial + one retry for any reason).
-
-The harness SKILL.md keeps its own full Cascade section until step 5 removes the remaining deltas (ledger D7); where they disagree, the harness section wins.
 
 ## Envelope parser
 
@@ -194,7 +206,7 @@ The orchestrator never reads a seat's full reply. After each dispatch it saves t
 ```
 python -I scripts/council_parse.py init     --run <run>
 python -I scripts/council_parse.py open-ids --run <run>
-python -I scripts/council_parse.py parse    --run <run> --seat <n> --label "<label>" --reply <file> [--role <role>] [--hold-artifact] [--final-attempt]
+python -I scripts/council_parse.py parse    --run <run> --seat <n> --label "<label>" --reply <file> [--role reviewer|breadth-auditor|integrator] [--hold-artifact] [--final-attempt]
 python -I scripts/council_parse.py apply    --run <run> --seat <n>
 python -I scripts/council_parse.py reject   --run <run> --seat <n>
 ```
@@ -205,13 +217,13 @@ python -I scripts/council_parse.py reject   --run <run> --seat <n>
 |------|-------------------------|---------------------|
 | 0 | `ok` | Continue. Packets and `artifact.md` are updated |
 | 0 | `ok_illegal_identity_dropped` | Only with `--final-attempt`: identity kept, invalid closing statuses ignored, `failures.md` logged; continue |
-| 3 | `malformed` | Retry once with "return only the Council envelope". On the final attempt pass `--final-attempt`: nothing is applied, `failures.md` is logged, continue |
+| 3 | `malformed` | Retry once with "return only the Council envelope" (for `revised_not_allowed`: "this seat is gaps-only; Revised must be exactly UNCHANGED, put every change under Gaps"). On the final attempt pass `--final-attempt`: nothing is applied (a reviewer's changed Revised is ignored and its gaps are kept), `failures.md` is logged, continue |
 | 4 | `illegal_identity` | `UNCHANGED` plus ordinary `addressed` on an open ID. Retry once; on the final attempt pass `--final-attempt` |
 | 2 | (stderr) | Usage, IO or corrupt-state error: bad or non-integer `--seat`, missing run dir or reply file, a seat number that was already parsed (use a new number for a new dispatch), or a corrupt `gaps.json`. Fix the call; nothing was changed |
 
 What `parse` does, in this order (the rules in [After a successful parse](#after-a-successful-parse) are its contract): strip any preamble before the first sentinel; require `<<<COUNCIL_REVISED>>>` and `<<<COUNCIL_END>>>` (the **last** END wins, so an artifact that mentions the sentinel text survives); mint `G<seat>-<n>` IDs with tiers; apply STATUS values (`addressed` is accepted only from a non-identity Revised, or as `addressed (pre-existing)` with identity; a closed ID STATUSed `unresolved`/`rejected` reopens); restore any open blocking ID the seat omitted under `### Orchestrator — restored`; append `gaps.md` and `unresolved.md`; write `artifact.md` (or `seat-<n>-revised.md` with `--hold-artifact`); regenerate `verdicts.md` and `open-gaps.md`. The summary also lists `restored` and `ignored_status_ids` (statuses for unknown IDs).
 
-Harness-specific checks that must run **between** parse and acceptance (Cursor: Breadth-auditor content-loss guard) use `--hold-artifact`. The seat's minted gaps and Unresolved items are committed at once, but its Revised **and all of its status changes and dissent restorations** are held (`seat-<n>-revised.md`, `seat-<n>-pending.json`). `apply` commits them if the check passes; `reject` discards them, marks the seat `(revised rejected)` in `gaps.md` and logs `revised-rejected` in `failures.md`.
+`--hold-artifact` is for stages that need a check between parse and acceptance (the step 7 rewriter). The seat's minted gaps and Unresolved items are committed at once, but its Revised **and all of its status changes and dissent restorations** are held (`seat-<n>-revised.md`, `seat-<n>-pending.json`). `apply` commits them if the check passes; `reject` discards them, marks the seat `(revised rejected)` in `gaps.md` and logs `revised-rejected` in `failures.md`. Reviewers do not use it: they cannot change the artifact.
 
 State model: `gaps.json` is the single source of truth. `gaps.md`, `unresolved.md`, `verdicts.md` and `open-gaps.md` are rendered from it on every command, so a run interrupted mid-write heals itself on the next `parse` or `open-ids`. `artifact.md` is written before the state is committed. Tolerated reply formats: `-`, `*`, `+`, `1.`, `1)` bullets; bold or backticked IDs; lowercase IDs; table rows for STATUS; `blocking:`/`optional:` tiers (bold allowed). Gap or Unresolved prose with no bullets is kept as one item, never dropped. Patch-shaped Revised text (unified diff, or an `*** Begin Patch` block) is malformed.
 
@@ -222,35 +234,33 @@ Tests: `cd scripts && python -B -m unittest test_council_parse`.
 1. Parse sentinel envelope (`<<<COUNCIL_STATUS>>>` … `<<<COUNCIL_END>>>`). Both `<<<COUNCIL_REVISED>>>` and `<<<COUNCIL_END>>>` must be present.
 2. A reply without the sentinels is **malformed** (the legacy `## Gaps` / `## Revised output` fallback was removed in step 4). The parser reports why (`no_sentinel`, `missing_revised_marker`, `missing_end_marker`, `empty_revised`, `patch_like_revised`, `sentinels_out_of_order`).
 3. **Identity:** if the Revised body (trimmed, case-insensitive) is exactly `UNCHANGED`, treat Revised as a copy of the pre-seat `artifact.md`. Missing Revised marker, empty Revised, or missing closer is **not** identity — it is malformed.
-4. If still unparseable, empty/missing Revised, a patch list, or **illegal identity** (see below): **one new** Task/CLI retry **only if** this seat has not already used its retry. Prompt: return **only** the sentinel envelope; legal identity is the token `UNCHANGED` with both sentinels; do not use `##` as markers. Retry is always **read-only** (no workspace mutation).
-5. If still bad: keep last good artifact; `failures.md`; continue. Do not run the content-loss guard when parsing failed. Do not apply that seat's closing statuses.
+4. If still unparseable, empty/missing Revised, a patch list, a changed Revised from a gaps-only seat (`revised_not_allowed`), or **illegal identity** (see below): **one new** Task/CLI retry **only if** this seat has not already used its retry. Prompt: return **only** the sentinel envelope; legal identity is the token `UNCHANGED` with both sentinels; do not use `##` as markers. Retry is always **read-only** (no workspace mutation).
+5. If still bad: keep last good artifact; `failures.md`; continue. Do not apply that seat's closing statuses.
 
 **Illegal identity:** Revised is identity (`UNCHANGED`) **and** STATUS marks any **currently open** ID `addressed` without the exact suffix `(pre-existing)`. Do **not** infer illegality from Gaps prose. On illegal identity after the retry slot is already spent: keep identity artifact, **do not** apply invalid closing statuses, `failures.md` reason `illegal-identity`, continue (never a third dispatch).
 
-**Dispatch budget:** at most **two** dispatches per seat (all reasons combined). Parse retry, illegal-identity retry, and content-loss retry share that single retry slot — never three invocations.
+**Dispatch budget:** at most **two** dispatches per seat (all reasons combined). Parse retry and illegal-identity retry share that single retry slot — never three invocations.
 
 ## After a successful parse
 
-- If `role: breadth-auditor`, run the harness's content-loss guard if it defines one (Cursor: Breadth-auditor content-loss guard) before replacing `artifact.md`. On guard failure after retries, stop this list (failed seat path above).
-- Write raw reply to `seat-<n>-<dispatched-slug>.md`
-- If Revised is legal `UNCHANGED`, persist the pre-seat artifact (no rewrite). Otherwise replace `artifact.md` with Revised output (between `<<<COUNCIL_REVISED>>>` and `<<<COUNCIL_END>>>`, or legacy Revised section)
-- Assign new gap bullets IDs `G<seat>-<n>` (1-based in that seat) and **append** to `gaps.md` under `### Seat <n> — <label>`. Prefix `optional:` → tier optional; `blocking:` or no prefix → blocking. On the **first** append to `gaps.md` or `unresolved.md`, replace the init `none` / `(none yet)` placeholder with that heading block.
-- **Append** Unresolved to `unresolved.md` under the same heading (do not replace the file)
-- **Dissent check:** every **open blocking** ID (from `verdicts.md` before this seat’s new IDs, latest verdict not `addressed`) must appear in `<<<COUNCIL_STATUS>>>`. Missing blocking IDs → append under `### Orchestrator — restored` in `unresolved.md` with the original bullet text and set verdict `unresolved`. Missing optional IDs do **not** fail the check. Do **not** grep the artifact for similar sentences. Mention restored IDs at Return.
-- **Verdict ledger:** after the envelope is accepted (and after content-loss validation that decides which statuses count), update `verdicts.md`. `addressed` is accepted only from a non-identity Revised, or from `addressed (pre-existing)` with identity. Ordinary `addressed` on identity is ignored (illegal-identity path). If the seat STATUSes a closed ID `unresolved` or `rejected`, reopen it. Do not apply closing statuses from a failed or rejected Revised. The orchestrator never reclassifies blocking/optional tier.
-- Rebuild `open-gaps.md` from open IDs (full claim text + tier + minting seat). Omit the file when no IDs are open. Ordinary later seats read `open-gaps.md`, not `gaps.md`.
-- Update streaks for any harness extension that defines them (Cursor: Churn guard, Terminal calm skip; see divergence ledger).
-- **Breadth findings:** if `role: breadth-auditor` and Gaps is non-empty, mint IDs into `gaps.md` as usual so **later seats** must STATUS blocking ones. Do not treat copy-through Gaps as a terminal “unincorporated” list yet — later seats are expected to address them. If the breadth seat's Revised was rejected (`cli-content-loss`), still append Gaps under `(revised rejected)` so later seats (or Return) can see them.
-- If run mode is `implementation` and Revised contains path-fenced files or patch-like blocks, [Apply implementation Revised](#apply-implementation-revised). Optional IDs never STATUSed by any later seat are listed once at Return (do not treat that as a failed dissent check).
+`scripts/council_parse.py` does all of this ([Envelope parser](#envelope-parser)); these rules are its contract.
+
+- Write the raw reply to `seat-<n>-<dispatched-slug>.md`.
+- If Revised is legal `UNCHANGED`, the artifact is untouched. Only the integrator may replace `artifact.md` (with the text between `<<<COUNCIL_REVISED>>>` and `<<<COUNCIL_END>>>`).
+- Assign new gap bullets IDs `G<seat>-<n>` (1-based in that seat); `optional:` → tier optional; `blocking:` or no prefix → blocking. `gaps.md` and `unresolved.md` get one section per seat; the `none` / `(none yet)` placeholder disappears with the first one.
+- **Dissent check:** every **open blocking** ID (latest verdict not `addressed`) must appear in `<<<COUNCIL_STATUS>>>`. Missing blocking IDs are restored under `### Orchestrator — restored` in `unresolved.md` and set to `unresolved`. Missing optional IDs do **not** fail the check. Do **not** grep the artifact for similar sentences. Mention restored IDs at Return.
+- **Verdict ledger:** `addressed` is accepted only from a non-identity Revised (the integrator), or as `addressed (pre-existing)` with identity. Ordinary `addressed` on identity is ignored (illegal-identity path). A closed ID STATUSed `unresolved` or `rejected` is reopened. Closing statuses from a failed seat are never applied. The orchestrator never reclassifies blocking/optional tier.
+- `open-gaps.md` lists open IDs (full claim text, tier, minting seat, latest status and reason) and is omitted when nothing is open. Later seats read `open-gaps.md`, not `gaps.md`.
+- If run mode is `implementation` and the integrator's Revised contains path-fenced files or patch-like blocks, [Apply implementation Revised](#apply-implementation-revised). Optional IDs never STATUSed by anyone are listed once at Return (not a failed dissent check).
 
 ## Apply implementation Revised
 
 Reviewers never write the workspace. After a successful parse in `implementation` mode:
 
-1. If the seat has `role: breadth-auditor` **or** `kind: cli`: refuse all path-fenced blocks, `### FILE:` sections, and unified-diff / patch-like blocks; log `path-refuse-role` or `cli-file-refuse` in `failures.md`; do not write files. Artifact update still proceeds if Revised otherwise passed.
+1. If the seat is not the integrator (reviewers never revise): refuse all path-fenced blocks, `### FILE:` sections, and unified-diff / patch-like blocks; log `path-refuse-role` in `failures.md`; do not write files.
 2. Otherwise extract path-fenced blocks from Revised: either fenced code blocks whose info string is a path, or sections headed `### FILE: <path>`.
 3. Resolve each path; allow only paths under the skill root or a declared project / review root from `meta.md` / request. Refuse anything else (`failures.md` `path-refuse`).
-4. Write those file bodies (UTF-8). Do not apply on parse failure, content-loss failure, or during retry.
+4. Write those file bodies (UTF-8). Do not apply on parse failure or during retry.
 
 ## Run retention
 
@@ -263,14 +273,10 @@ Deleting a run deletes its `exchange.md`. Skill-root `last-exchange.md` is only 
 
 ## Return
 
-After the last seat (or after churn-stop Cursor skip + deferred CLI seats finish):
+After the last stage:
 
 1. Reply with the final artifact (no extra editorial pass).
-2. **Breadth audit findings** (only leftovers): after the cascade, list breadth-auditor Gaps that never landed as `addressed` in a later seat's STATUS — still `unresolved` / `rejected` / restored, or from a `cli-content-loss` seat with no later incorporation. Place the short heading **after** the artifact and **before** Unresolved. Omit it when every breadth ID was addressed. Do not silently rewrite the artifact from leftover bullets.
-3. If `unresolved.md` has any non-`none` items (including restored IDs), add a short **Unresolved** list.
-4. One line: roster used, including skipped/failed seats and remaps (`same-model`, `rejected-family`, `rejected-slug`, `family-remap`, `seat0-id-strip`, CLI misses, `permission-gate`, `ps-runtime`, `cli-preflight-agy`, `cli-preflight-codex`, `codex-stale-or-missing-last-message`, parse failures, timeouts, `cli-content-loss`, `path-refuse-role`, `cli-file-refuse`, `churn-stop`, `terminal-calm`).
+2. **Gaps not incorporated** (omit when every gap was addressed): list every gap still open after integration, each with its ID, tier, minting seat and the integrator's reason (`rejected — why`, or `unresolved`/restored). Optional IDs nobody STATUSed are listed once. Place this after the artifact. Do not silently rewrite the artifact from these bullets.
+3. If `unresolved.md` has other non-`none` items (including restored IDs), add a short **Unresolved** list.
+4. One line: roster used, including skipped/failed seats and remaps (`same-model`, `no-transport`, `rejected-family`, `rejected-slug`, `family-remap`, `seat0-id-strip`, `rewriter-not-implemented`, `revised-not-allowed`, `revised-rejected`, `illegal-identity`, preflight failures such as `cli-preflight-agy` / `cli-preflight-codex` / `cli-preflight-agent`, parse failures, timeouts, `path-refuse-role`).
 5. If exchange was requested: write `<run>/exchange.md` with the transcript; set `<skill-root>/last-exchange.md` to a **single line** that is the absolute path (or run id) of that `exchange.md`. Do not keep a second full copy at skill root. Secret-hygiene applies to both.
-
-## Harness extensions referenced above
-
-Rules that this file mentions but does not define (Cursor-only until the named step): Churn guard, Terminal calm skip, Breadth-auditor content-loss guard, Family slug resolve. See the divergence ledger.

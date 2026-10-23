@@ -25,10 +25,8 @@ Do **not** read `meta.md`. Do **not** require `gaps.md` on ordinary seats (`gaps
 ## What to do
 
 1. Review the current artifact against the request.
-2. STATUS every **open blocking** ID the orchestrator listed.
-3. Incorporate prior gaps that improve the artifact.
-4. Return `UNCHANGED` or a full replacement artifact (never a patch list).
-5. Preserve accepted content from earlier seats unless you have a concrete reason (state it under Gaps).
+2. STATUS every **open blocking** ID the orchestrator listed (`unresolved`, `rejected — why`, or `addressed (pre-existing)`).
+3. Report every change you want as a Gap. You do not rewrite the artifact: Revised is exactly `UNCHANGED`.
 
 Mint new Gaps with `blocking:` (default if unprefixed) or `optional:`. Flavor and non-required page-limit notes should be `optional:`. Missed requirements, factual errors, safety issues, and contradictions stay blocking.
 
@@ -38,7 +36,7 @@ Mint new Gaps with `blocking:` (default if unprefixed) or `optional:`. Flavor an
 
 **Reads are scoped to exactly the paths listed in the "Packed context" set above — nothing else.** No shell/terminal commands, no URL fetches, no browsing, no reading a file that wasn't listed, even read-only. In headless CLI seats this isn't a style preference: an unauthorized tool call — a command, a URL fetch, an unlisted file — gets silently auto-denied with no way to prompt for approval, and the entire seat fails with no output. Confirmed by direct reproduction 2026-09-09: the identical seat prompt failed on separate runs for three different reasons (`read_file`, `read_url`, `command`), never because a *listed* file was unreadable — the model reaching for something outside the granted set is the actual failure mode, not a scoping bug in the listed paths themselves. If the listed files aren't enough, say so under Gaps instead of trying to get more.
 
-For **implementation** tasks: put proposed file bodies in Revised using path-fenced blocks (fenced code with a path info string, or `### FILE: <path>` sections). The **orchestrator** applies those paths after a successful parse. You must not apply them yourself. The seat prompt header lists **allowed proposal/application roots** (not reviewer write roots).
+For **implementation** tasks: describe proposed code changes in prose under Gaps. Only the integration pass may return path-fenced file bodies; the **orchestrator** applies those paths after a successful parse. You must not apply anything yourself.
 
 Do not call further subagents.
 
@@ -47,11 +45,8 @@ Do not call further subagents.
 When prompt metadata says `role: breadth-auditor`:
 
 - Prioritize missed requirements, stale factual claims, edge cases, contradictory assumptions, and alternate angles.
-- Preserve all accepted prior-seat content.
-- Prefer Revised `UNCHANGED` unless a disk-verifiable factual correction requires a full Revised. "Disk-verifiable" means checkable against the listed packet files only — not a reason to fetch a URL or run a command to verify something; if you can't verify it from the listed files, say so under Gaps instead.
-- Identify each such change in Gaps using the exact prefix `Factual correction:` after the bullet marker.
-- Do not restyle, summarize, reorder, delete sections, or return a patch.
-- Report breadth findings under Gaps even when Revised is `UNCHANGED`. Prefer raising them early so later seats can STATUS and incorporate them; being last is not a reason to return Gaps `- none` if you found something.
+- You are still gaps-only: Revised is `UNCHANGED`. A factual correction is a Gap that begins `Factual correction:` and states the corrected fact and where it belongs.
+- Report breadth findings under Gaps. Prefer raising them early so later seats can STATUS them and the integration pass can resolve them; being last is not a reason to return Gaps `- none` if you found something.
 - Still STATUS every supplied open blocking ID.
 
-Cursor (and CLI) reviewers **without** this role remain full critical reviewers.
+Reviewers without this role are full critical reviewers; they are gaps-only as well.

@@ -344,8 +344,9 @@ def cmd_reject(a):
 
 def finish_bad(a, status, reason, code):
     summary = {"status": status, "reason": reason, "seat": a.seat, "label": a.label,
-               "action": "retry once with: return only the Council envelope" if not a.final_attempt
-               else "keep last good artifact; logged to failures.md; continue"}
+               "action": ("retry once with: return only the Council envelope" if reason != "revised_not_allowed"
+                          else "retry once: this seat is gaps-only, Revised must be exactly UNCHANGED; put every change under Gaps")
+               if not a.final_attempt else "keep last good artifact; logged to failures.md; continue"}
     if a.final_attempt:
         log_failure(a.run, f"seat {a.seat} ({a.label}): {status} ({reason})")
     print(json.dumps(summary, ensure_ascii=False))
@@ -374,6 +375,13 @@ def cmd_parse(a):
         return finish_bad(a, "malformed", "empty_revised", 3)
     if not identity and patch_like(revised):
         return finish_bad(a, "malformed", "patch_like_revised", 3)
+    # Gaps-only: only the integrator may return a changed artifact.
+    role = (a.role or "reviewer").lower()
+    if not identity and role != "integrator":
+        if not a.final_attempt:
+            return finish_bad(a, "malformed", "revised_not_allowed", 3)
+        log_failure(run, f"seat {seat} ({label}): revised-not-allowed (role {role}; Revised ignored, gaps kept)")
+        identity, revised = True, "UNCHANGED"
 
     statuses = parse_status(sec.get("STATUS", ""))
     bad_ids = [i for i, s in statuses.items() if identity and s["status"] == "addressed" and i in prior_open_all]
@@ -453,7 +461,7 @@ def build_parser():
     s = sub.add_parser("parse")
     s.add_argument("--run", required=True); s.add_argument("--seat", required=True, type=int)
     s.add_argument("--label", required=True); s.add_argument("--reply", required=True)
-    s.add_argument("--role", default=None)
+    s.add_argument("--role", default=None, help="reviewer (default) | breadth-auditor | integrator; only integrator may return a changed Revised")
     s.add_argument("--hold-artifact", action="store_true")
     s.add_argument("--final-attempt", action="store_true")
     return p

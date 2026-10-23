@@ -61,11 +61,11 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 ## Same-model skip (Cursor)
 
-Rule and family table: [core.md](core.md#same-model-skip). Seat 0 is the selected chat model, unless the user supplied the artifact: then its family is `unknown` and no reviewer is skipped.
+Rule and family table: [core.md](core.md#same-model-skip). Seat 0 is the selected chat model. For an artifact the user supplied, use the author's family if known (for "review the plan above" the previous assistant message is the chat model's, so the chat model's family), else `unknown`, which skips no reviewer.
 
 | Seat-0 family | Effective path (default roster) |
 |---|---|
-| Claude, Grok, Composer, or `unknown` (a supplied artifact) | Argon → Sol, then integrate, then Flash rewrite (nothing skipped) |
+| Claude, Grok, Composer, or `unknown` (author not known) | Argon → Sol, then integrate, then Flash rewrite (nothing skipped) |
 | GPT | Argon, then integrate, then Flash rewrite (Sol skipped) |
 | Gemini | Sol, then integrate (Argon skipped; the rewrite still runs) |
 
@@ -87,11 +87,11 @@ This is the only logic that differs from Claude Code. For each seat core.md says
 
 **Rewrite stage:** needs a Gemini Flash in the Task model list. As of 2026-10-23 the Task list has none ([catalog.md](catalog.md)), so the resolver returns `no-line-match`: skip the rewrite, say why in the Return line, and return the integrated artifact. If a Flash is offered, dispatch each chunk as a Task seat the same way, but ask it to write its output (the rewritten chunk followed by the final `REWRITE_END` line) to `<run>\rewrite\chunk-<i>-reply.txt` and acknowledge; if the file is missing, save the returned text there; then run `council_rewrite.py check --reply` on that file.
 
-**Integration stage:** dispatch as a Task seat with family `claude`, line `opus` (resolved like any seat), or run it yourself when the chat model is already Opus (then write your own envelope to `<run>\seat-<n>-reply.txt` and parse it like any seat with `--role integrator`). If the chat model is not Opus and no Opus Task model is available, warn the user that the draft and integration are not Opus-grade.
+**Integration stage:** dispatch as a Task seat with family `claude`, line `opus` (resolved like any seat), or run it yourself when the chat model is already Opus (then write your own envelope to `<run>\seat-<n>-reply.txt` and parse it like any seat with `--role integrator`, using the next seat number after the last reviewer). If the chat model is not Opus and no Opus Task model is available, warn the user that the draft and integration are not Opus-grade.
 
 ### Model resolution (Cursor)
 
-Take the model slugs your Task tool offers (the list in its definition; drop `inherit`), one per line, and write them to `<runs_dir>\task-models.txt` (`runs_dir` exists before the run folder, so this can happen before the roster is shown). Do **not** use `cursor-agent --list-models`: it lists far more models than the Task tool accepts. Then resolve each seat per [core.md](core.md#model-resolution) with `--source file:<runs_dir>\task-models.txt` (state file `<runs_dir>\_resolved.json`). The script picks the newest version of the seat's family and line and never crosses lines. If it returns `skip` (`no-line-match` or `no-catalog`), skip the seat (`rejected-family`) and say why. If a Task call is rejected, follow core.md's rejection flow once; never loop through candidates.
+Take the model slugs your Task tool offers (the list in its definition; drop `inherit`), one per line, and write them to `<runs_dir>\task-models.txt` (create `runs_dir` if it is missing; it does not depend on the run folder, so this can happen before the roster is shown). Do **not** use `cursor-agent --list-models`: it lists far more models than the Task tool accepts. Then resolve each seat per [core.md](core.md#model-resolution) with `--source file:<runs_dir>\task-models.txt` (state file `<runs_dir>\_resolved.json`). The script picks the newest version of the seat's family and line and never crosses lines. If it returns `skip` (`no-line-match` or `no-catalog`), skip the seat (`rejected-family`) and say why. If a Task call is rejected, follow core.md's rejection flow once; never loop through candidates.
 
 ## Return (Cursor)
 

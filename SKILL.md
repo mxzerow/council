@@ -49,7 +49,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 1. Do **not** call `rename_chat` unless the user explicitly asked to rename this chat.
 2. Read [config.yaml](config.yaml) and validate per [core.md](core.md#roster-seats): `seats` is a non-empty list (stop and point to the migration rule if the old `reviewers` / `cursor_reviewers` keys are present and `seats` is not); each seat has a known `family` and a `line`; `role` is `reviewer`, `breadth-auditor` or `rewriter`; `show_exchange` is `ask` | `always` | `never`; numeric keys per Config defaults. On invalid config, stop and ask the user to fix or reconfigure.
-3. Show the roster (count, labels, order) in one short list.
+3. Resolve models first ([Model resolution](#model-resolution-cursor)), then show the roster (count, labels, order) in one short list, flagging every seat that will be skipped (no matching model in the Task list, same-model skip).
 4. Confirm unless the user already decided:
    - `/council proceed` or `proceed` → run
    - `/council configure` or `configure` / `reconfigure` → [Reconfigure](#reconfigure)
@@ -61,11 +61,11 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 ## Same-model skip (Cursor)
 
-Rule and family table: [core.md](core.md#same-model-skip). Seat 0 is the selected chat model.
+Rule and family table: [core.md](core.md#same-model-skip). Seat 0 is the selected chat model, unless the user supplied the artifact: then its family is `unknown` and no reviewer is skipped.
 
 | Seat-0 family | Effective path (default roster) |
 |---|---|
-| Claude, Grok, Composer or unknown | Argon → Sol, then integrate, then Flash rewrite |
+| Claude, Grok, Composer, or `unknown` (a supplied artifact) | Argon → Sol, then integrate, then Flash rewrite (nothing skipped) |
 | GPT | Argon, then integrate, then Flash rewrite (Sol skipped) |
 | Gemini | Sol, then integrate (Argon skipped; the rewrite still runs) |
 
@@ -76,21 +76,22 @@ The integration and rewrite stages are **not** reviews, so they are never skippe
 This is the only logic that differs from Claude Code. For each seat core.md says to dispatch:
 
 1. **Resolve the model** per [Model resolution](#model-resolution-cursor). If it returns `skip`, skip the seat (`rejected-family`).
-2. **Prompt:** a short pointer. Include the fields core.md's Cascade loop lists, the absolute packet paths, and the output path `<run>\seat-<n>-reply.txt`. Do **not** paste `artifact.md` or skill file bodies into the Task prompt.
+2. **Prompt:** write `seat-<n>-prompt.md` as core.md's Cascade loop step 3 says (fields, packet paths, the inlined `reviewer-envelope.md`, and that the seat is gaps only). The Task prompt itself is a short pointer: read that file, then write the envelope to `<run>\seat-<n>-reply.txt`. Do **not** paste `artifact.md` or skill file bodies into the Task prompt.
 3. **Call:** `Task` with `subagent_type: generalPurpose`, `model` = the resolved slug, `run_in_background: false`.
 4. **Read-only:** tell the seat not to Write, Edit or Delete anything in the workspace, with one exception: it writes its envelope to `<run>\seat-<n>-reply.txt` and replies with a short acknowledgement only. If the file is missing afterwards (the Task returned the envelope as text), save the returned text to that file yourself. **Unverified in Cursor:** whether Task seats can write there and keep full replies out of the conversation; if they cannot, the context saving applies to Claude Code only.
 5. **Parse** with `scripts/council_parse.py` ([core.md](core.md#envelope-parser)). Retry = a **new** Task (do not assume resume), also read-only.
-6. Write `seat-<n>-<dispatched-slug>.md` (the slug actually passed to Task).
+6. The raw reply is `seat-<n>-reply.txt` (Cursor writes no separate `seat-<n>-<slug>.md`). Record the slug actually passed to Task in `meta.md` under `dispatched:`.
+7. **Failures:** Task has no stderr or argv, so `seat-<n>-argv-meta.txt` and `cli-preflight.txt` are not used in Cursor. If a Task call errors, save the error text to `<run>\seat-<n>-error.txt` and run `council_resolve.py classify --file` on it. If the error is about the `model` value (not found / not available), treat it as `model-rejected` even when classify says `other`, then follow core.md's rejection flow once.
 
 **Task seats and stalls:** the orchestrator cannot poll inside a blocking `Task`. Do **not** peek at `subagents\*.jsonl` mid-flight and call that a stall. If a Task hangs, the user interrupt is the escape. State this if a seat is taking unusually long.
 
-**Rewrite stage:** dispatch each chunk as a Task seat on the `rewriter` seat's resolved model, the same way (reply written to a file, then `council_rewrite.py check`). If the Task enum has no Gemini Flash, the resolver returns `no-line-match`: skip the rewrite, say why, and return the integrated artifact.
+**Rewrite stage:** needs a Gemini Flash in the Task model list. As of 2026-10-23 the Task list has none ([catalog.md](catalog.md)), so the resolver returns `no-line-match`: skip the rewrite, say why in the Return line, and return the integrated artifact. If a Flash is offered, dispatch each chunk as a Task seat the same way, but ask it to write its output (the rewritten chunk followed by the final `REWRITE_END` line) to `<run>\rewrite\chunk-<i>-reply.txt` and acknowledge; if the file is missing, save the returned text there; then run `council_rewrite.py check --reply` on that file.
 
-**Integration stage:** dispatch as a Task seat with family `claude`, line `opus` (resolved like any seat), or run it yourself when the chat model is already Opus. If the chat model is not Opus and no Opus Task model is available, warn the user that the draft and integration are not Opus-grade.
+**Integration stage:** dispatch as a Task seat with family `claude`, line `opus` (resolved like any seat), or run it yourself when the chat model is already Opus (then write your own envelope to `<run>\seat-<n>-reply.txt` and parse it like any seat with `--role integrator`). If the chat model is not Opus and no Opus Task model is available, warn the user that the draft and integration are not Opus-grade.
 
 ### Model resolution (Cursor)
 
-Write the Task `model` enum, one slug per line, to `<run>\task-models.txt`, then resolve each seat per [core.md](core.md#model-resolution) with `--source file:<run>\task-models.txt` (state file `<runs_dir>\_resolved.json`). The script picks the newest version of the seat's family and line; it never crosses lines. If it returns `skip` (`no-line-match` or `no-catalog`), skip the seat (`rejected-family`) and say why. If a Task call is rejected, follow core.md's rejection flow once; never loop through candidates. Write `seat-<n>-<dispatched-slug>.md` with the slug actually passed to Task.
+Take the model slugs your Task tool offers (the list in its definition; drop `inherit`), one per line, and write them to `<runs_dir>\task-models.txt` (`runs_dir` exists before the run folder, so this can happen before the roster is shown). Do **not** use `cursor-agent --list-models`: it lists far more models than the Task tool accepts. Then resolve each seat per [core.md](core.md#model-resolution) with `--source file:<runs_dir>\task-models.txt` (state file `<runs_dir>\_resolved.json`). The script picks the newest version of the seat's family and line and never crosses lines. If it returns `skip` (`no-line-match` or `no-catalog`), skip the seat (`rejected-family`) and say why. If a Task call is rejected, follow core.md's rejection flow once; never loop through candidates.
 
 ## Return (Cursor)
 

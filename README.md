@@ -94,7 +94,7 @@ The scripts are what keeps the model-written parts honest: replies are parsed an
 
 ## Status
 
-Verified live in Claude Code on 2026-10-23 (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite). The Cursor path (Task seats writing their reply to a file, the Task model list, an Opus Task seat, and whether the Task list offers Gemini Flash) has not been run yet; the first Cursor run is the check.
+Verified live in Claude Code on 2026-10-23 (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite). Cursor's own agent read the skill and reported READY WITH FIXES (fixed since): the Task tool offers Gemini 4 Argon, Claude Opus 5.5 and GPT-5.6 Sol but **no Gemini Flash**, so in Cursor the rewrite stage is skipped and the integrated artifact is returned. Task seats writing their reply to a file, and shell access for the scripts outside plan mode, have not been exercised yet; the first real Cursor run is the check.
 
 ## Run data
 

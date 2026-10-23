@@ -196,6 +196,7 @@ python -I scripts/council_parse.py init     --run <run>
 python -I scripts/council_parse.py open-ids --run <run>
 python -I scripts/council_parse.py parse    --run <run> --seat <n> --label "<label>" --reply <file> [--role <role>] [--hold-artifact] [--final-attempt]
 python -I scripts/council_parse.py apply    --run <run> --seat <n>
+python -I scripts/council_parse.py reject   --run <run> --seat <n>
 ```
 
 (Run from the shared root; standard library only, Python 3.) `--reply` may be the raw text, a Codex `-o` last-message file, or the JSON a CLI printed (`text` or `result` is unwrapped).
@@ -206,11 +207,13 @@ python -I scripts/council_parse.py apply    --run <run> --seat <n>
 | 0 | `ok_illegal_identity_dropped` | Only with `--final-attempt`: identity kept, invalid closing statuses ignored, `failures.md` logged; continue |
 | 3 | `malformed` | Retry once with "return only the Council envelope". On the final attempt pass `--final-attempt`: nothing is applied, `failures.md` is logged, continue |
 | 4 | `illegal_identity` | `UNCHANGED` plus ordinary `addressed` on an open ID. Retry once; on the final attempt pass `--final-attempt` |
-| 2 | (stderr) | Usage or IO error; fix the call |
+| 2 | (stderr) | Usage, IO or corrupt-state error: bad or non-integer `--seat`, missing run dir or reply file, a seat number that was already parsed (use a new number for a new dispatch), or a corrupt `gaps.json`. Fix the call; nothing was changed |
 
 What `parse` does, in this order (the rules in [After a successful parse](#after-a-successful-parse) are its contract): strip any preamble before the first sentinel; require `<<<COUNCIL_REVISED>>>` and `<<<COUNCIL_END>>>` (the **last** END wins, so an artifact that mentions the sentinel text survives); mint `G<seat>-<n>` IDs with tiers; apply STATUS values (`addressed` is accepted only from a non-identity Revised, or as `addressed (pre-existing)` with identity; a closed ID STATUSed `unresolved`/`rejected` reopens); restore any open blocking ID the seat omitted under `### Orchestrator — restored`; append `gaps.md` and `unresolved.md`; write `artifact.md` (or `seat-<n>-revised.md` with `--hold-artifact`); regenerate `verdicts.md` and `open-gaps.md`. The summary also lists `restored` and `ignored_status_ids` (statuses for unknown IDs).
 
-Harness-specific checks that must run **between** parse and acceptance (Cursor: Breadth-auditor content-loss guard) use `--hold-artifact`, then call `apply` only if the check passes.
+Harness-specific checks that must run **between** parse and acceptance (Cursor: Breadth-auditor content-loss guard) use `--hold-artifact`. The seat's minted gaps and Unresolved items are committed at once, but its Revised **and all of its status changes and dissent restorations** are held (`seat-<n>-revised.md`, `seat-<n>-pending.json`). `apply` commits them if the check passes; `reject` discards them, marks the seat `(revised rejected)` in `gaps.md` and logs `revised-rejected` in `failures.md`.
+
+State model: `gaps.json` is the single source of truth. `gaps.md`, `unresolved.md`, `verdicts.md` and `open-gaps.md` are rendered from it on every command, so a run interrupted mid-write heals itself on the next `parse` or `open-ids`. `artifact.md` is written before the state is committed. Tolerated reply formats: `-`, `*`, `+`, `1.`, `1)` bullets; bold or backticked IDs; lowercase IDs; table rows for STATUS; `blocking:`/`optional:` tiers (bold allowed). Gap or Unresolved prose with no bullets is kept as one item, never dropped. Patch-shaped Revised text (unified diff, or an `*** Begin Patch` block) is malformed.
 
 Tests: `cd scripts && python -B -m unittest test_council_parse`.
 

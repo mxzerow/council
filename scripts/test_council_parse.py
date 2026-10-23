@@ -187,5 +187,117 @@ class Bad(Base):
         self.assertIn("more", self.read("artifact.md"))
 
 
+class ReviewFindings(Base):
+    """Regression tests for the Codex review of 2026-10-23."""
+
+    def seed(self):
+        self.parse(1, env(gaps="- blocking: fix bug"))
+
+    def cli(self, *args):
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = cp.main(list(args))
+        except SystemExit as e:
+            code = e.code
+        return code, out.getvalue()
+
+    def test_hold_rejection_preserves_verdicts(self):
+        self.seed()
+        code, s = self.parse(2, env(status="G1-1: addressed", revised="replacement"), None, "--hold-artifact")
+        self.assertTrue(s["pending_until_apply"])
+        self.assertEqual(self.open_ids(), "G1-1")          # nothing closed yet
+        self.assertIsNotNone(self.read("open-gaps.md"))
+        self.cli("reject", "--run", self.run, "--seat", "2")
+        self.assertEqual(self.open_ids(), "G1-1")          # still open after rejection
+        self.assertEqual(self.read("artifact.md"), "# Plan\nbody\n")
+        self.assertIn("revised-rejected", self.read("failures.md"))
+        self.assertIn("(revised rejected)", self.read("gaps.md"))
+        self.assertFalse(os.path.exists(os.path.join(self.run, "seat-2-revised.md")))
+
+    def test_hold_then_apply_closes_and_replaces(self):
+        self.seed()
+        self.parse(2, env(status="G1-1: addressed", revised="replacement"), None, "--hold-artifact")
+        self.cli("apply", "--run", self.run, "--seat", "2")
+        self.assertEqual(self.open_ids(), "none")
+        self.assertEqual(self.read("artifact.md"), "replacement\n")
+
+    def test_hold_restores_are_deferred_too(self):
+        self.parse(1, env(gaps="- blocking: a\n- blocking: b"))
+        self.parse(2, env(status="G1-1: unresolved", revised="v2"), None, "--hold-artifact")
+        self.assertNotIn("restored", (self.read("unresolved.md") or ""))
+        self.cli("apply", "--run", self.run, "--seat", "2")
+        self.assertIn("restored", self.read("unresolved.md"))
+
+    def test_duplicate_seat_rejected_and_state_untouched(self):
+        self.parse(1, env(gaps="- blocking: original claim"))
+        before = self.read("gaps.json")
+        code, _ = self.cli("parse", "--run", self.run, "--seat", "1", "--label", "S1", "--reply",
+                           os.path.join(self.run, "reply-1.txt"))
+        self.assertEqual(code, 2)
+        self.assertEqual(self.read("gaps.json"), before)
+
+    def test_interrupted_commit_heals_on_next_command(self):
+        self.seed()
+        real = cp.render_all
+        calls = {"n": 0}
+
+        def boom(run, st):
+            calls["n"] += 1
+            if calls["n"] == 2:  # the render inside parse, after the state commit
+                raise OSError("disk full")
+            return real(run, st)
+
+        cp.render_all = boom
+        try:
+            with self.assertRaises(OSError):
+                reply = os.path.join(self.run, "r2.txt")
+                with open(reply, "w", encoding="utf-8") as f:
+                    f.write(env(status="G1-1: addressed", revised="replacement"))
+                cp.cmd_parse(cp.build_parser().parse_args(
+                    ["parse", "--run", self.run, "--seat", "2", "--label", "S2", "--reply", reply]))
+        finally:
+            cp.render_all = real
+        self.assertIn("G1-1: open", self.read("verdicts.md"))     # stale derived file...
+        self.assertEqual(self.open_ids(), "none")                  # ...healed by the next command
+        self.assertIn("G1-1: addressed", self.read("verdicts.md"))
+        self.assertIsNone(self.read("open-gaps.md"))
+
+    def test_apply_patch_envelope_is_malformed(self):
+        self.seed()
+        patch = "*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"
+        code, s = self.parse(2, env(status="G1-1: addressed", revised=patch))
+        self.assertEqual((code, s["reason"]), (3, "patch_like_revised"))
+        self.assertEqual(self.open_ids(), "G1-1")
+        self.assertEqual(self.read("artifact.md"), "# Plan\nbody\n")
+
+    def test_markdown_status_variants(self):
+        for fmt in ["**G1-1**: addressed (pre-existing)", "`G1-1`: addressed (pre-existing)",
+                    "1. G1-1: addressed (pre-existing)", "| G1-1 | addressed (pre-existing) |",
+                    "g1-1: addressed (pre-existing)", "- **G1-1:** addressed (pre-existing)"]:
+            with self.subTest(fmt=fmt):
+                self.tearDown(); self.setUp()
+                self.seed()
+                code, s = self.parse(2, env(status=fmt))
+                self.assertEqual(self.open_ids(), "none", fmt)
+                self.assertEqual(s["restored"], [])
+
+    def test_numbered_and_loose_gap_lists(self):
+        code, s = self.parse(1, env(gaps="1. blocking: real issue\n2) optional: nit"))
+        self.assertEqual((s["gaps"]["blocking"], s["gaps"]["optional"]), (1, 1))
+        self.tearDown(); self.setUp()
+        code, s = self.parse(1, env(gaps="The plan lacks a rollback step."))
+        self.assertEqual(s["gaps"]["blocking"], 1)                  # prose is kept, not dropped
+
+    def test_exit_2_for_usage_and_io_errors(self):
+        self.assertEqual(self.cli("parse", "--run", self.run, "--seat", "x", "--label", "S", "--reply", "nope")[0], 2)
+        self.assertEqual(self.cli("parse", "--run", self.run, "--seat", "1", "--label", "S", "--reply", "nope.txt")[0], 2)
+        self.assertEqual(self.cli("parse", "--run", os.path.join(self.run, "missing"), "--seat", "1",
+                                  "--label", "S", "--reply", "x")[0], 2)
+        with open(os.path.join(self.run, "gaps.json"), "w", encoding="utf-8") as f:
+            f.write("{not json")
+        self.assertEqual(self.cli("open-ids", "--run", self.run)[0], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

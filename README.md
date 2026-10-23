@@ -43,6 +43,45 @@ In Cursor:
 
 Say `/council` with a topic, point it at an existing draft, or ask for a council / wide / multi-model review. The skill confirms the roster unless you already said `proceed` or included the topic in the same message.
 
+## When to invoke / how to pack
+
+Prefer **one coherent mid-size artifact** over a mega-dump or many tiny councils. Cascade seats do **not** break work up (no subagents; path-scoped reads). Partitioning is an **orchestration** step before the cascade.
+
+### When to invoke
+
+Invoke when the deliverable is high-stakes, you want cross-vendor challenge on one coherent artifact, and a draft exists (or seat 0 can write one).
+
+Skip when: trivia / one-liners / single-file nits; answers needed in under a minute; routine work; or the “artifact” would be an unbounded dump (“review this whole feature”).
+
+### How to pack a run
+
+1. **Artifact type:** design/plan prose, or a bounded set of path-fenced files for implementation review (tighter scope than prose — hot paths only).
+2. **Size check:** one human sitting. If not, stop and partition (below).
+3. **`request.md`:** short hints — goal, constraints, non-goals, absolute paths + stable anchors. Do not paste whole modules.
+4. **`artifact.md`:** full text of the draft under review. Prefer live paths for on-disk code; do not duplicate entire trees.
+5. **List only files seats must read** — every listed file is paid by every seat.
+6. **`review_roots`:** only when CLI seats need `--add-dir` for those live paths.
+7. **Exchange:** final-only unless you need the transcript.
+
+### When the problem is too big (cut plan)
+
+| Step | What happens |
+|------|----------------|
+| Framing / cut plan | Seat 0 / chat model proposes goals, interfaces, invariants, non-goals, partition map + links (**size-bounded** framing) |
+| Gemini breadth | Breadth-check the cut plan (standalone or Framing Council with Gemini as breadth-auditor) |
+| Human veto | **Required when input is large** — approve, reject, or reshape before partition Councils |
+| Gate + freeze | No partition runs until framing converged (or human-accepted risks); then freeze/version the framing |
+| Partition Councils | One deep dive per cut; `request.md` carries frozen invariants; full framing listed only if touching shared interfaces |
+| Integration (optional) | Merged plan / conflict list |
+
+**Who proposes cuts (decided):** Seat 0 / chat model → Gemini breadth on the cut plan → **human veto if input is large**.
+
+Keep the framing doc small: it is multiplied across seats × partitions. Prefer concurrent partitions against a **frozen** shared contract; if the contract cannot freeze, run dependents sequentially.
+
+Anti-patterns: mega-`artifact.md`; parallel micro-councils with no framing; starting partitions while framing still has open blocking gaps; summarizing the codebase into the artifact to “save tokens”; expecting cascade seats to sub-delegate around context limits.
+
+Council already does **packet hygiene** (short `request.md`, path-only prompts, `open-gaps.md`, compact envelopes, churn/same-model skip). It does **not** silently compress or summarize `artifact.md`.
+
 ## What you need
 
 | Seat | Requirement |

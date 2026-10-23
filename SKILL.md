@@ -62,6 +62,8 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 If `reviewers` is longer than `max_reviewers`, warn, use the first N seats, continue unless the user insists on the full list.
 
+**Cursor roster:** this orchestrator reads `cursor_reviewers`, not `reviewers`; `reviewers` belongs to the Claude Code sibling. Every `cursor_reviewers` seat must be `kind: cursor` and runs through Task. Never dispatch a `kind: cli` seat or shell out to `agy`, `gemini`, `codex`, or `agent` from Cursor. Where this file describes `reviewers`, CLI seats, agy, Codex, or Grok, that is the Claude Code roster; apply the same rules to `cursor_reviewers` (default Gemini breadth-auditor → Opus → Sol → Gemini). Reconfigure writes `cursor_reviewers`.
+
 Optional per-reviewer keys:
 
 - `validation_critical: true` — churn-stop must not skip this seat
@@ -74,7 +76,7 @@ Optional per-reviewer keys:
 ## Start
 
 1. Do **not** call `rename_chat` unless the user explicitly asked to rename this chat. Skipping is not a blocker.
-2. Read [config.yaml](config.yaml). Validate: `reviewers` is a non-empty list; each entry has `kind` (`cursor` or `cli`); cursor entries have `model`; cli entries have `command` (`agy` | `gemini` | `codex`) or are Gemini/Antigravity/Codex by label; `show_exchange` is `ask` | `always` | `never`; `terminal_calm_skip` is `true` or `false` when present (default `false`); numeric keys per [Config defaults](#config-defaults); when `role` is present it must be a documented value (`breadth-auditor` today) — unrecognized `role` is invalid. On invalid config, stop and ask the user to fix or reconfigure.
+2. Read [config.yaml](config.yaml). Validate: `cursor_reviewers` is a non-empty list; each entry has `kind: cursor` (a `cli` entry is invalid here) and a `model`; `show_exchange` is `ask` | `always` | `never`; `terminal_calm_skip` is `true` or `false` when present (default `false`); numeric keys per [Config defaults](#config-defaults); when `role` is present it must be a documented value (`breadth-auditor` today) — unrecognized `role` is invalid. On invalid config, stop and ask the user to fix or reconfigure.
 3. Show the roster (count, labels, order) in one short list. Apply `max_reviewers` as above.
 4. Confirm unless the user already decided:
 
@@ -101,6 +103,26 @@ Decide what seat 0 should be **before** drafting:
 | User points at an existing draft ("review the plan above", "council this implementation", pastes text) | Pack that as `artifact.md`; **skip** seat-0 rewrite |
 | User asks a new question / new design task | Seat 0 writes a **new** draft |
 
+### Size check and partitioning
+
+Before packing a single cascade, apply a **size check**: if a careful human could not review the same packet in one sitting, do **not** dump it into one `artifact.md`. Cascade seats cannot sub-delegate or read unlisted paths — they will not auto-partition.
+
+**When too large, run the cut-plan pipeline (decided):**
+
+1. **Seat 0 / chat model** proposes a size-bounded **framing** artifact: goals, constraints, interfaces/invariants, non-goals, partition map, stable path pointers. Exclude rationale essays, history, full code, and anything only one partition needs.
+2. **Gemini breadth** on the cut plan (cheap standalone breadth pass, or a Framing Council whose first seat is `role: breadth-auditor`).
+3. **Human veto when input is large** — show the proposed partitions and wait for approve / reject / reshape before launching partition Councils. For small single-packet work, human veto is optional.
+4. **Gate + freeze:** no partition Councils until framing has no open blocking gaps (or the human explicitly accepts remaining blockers as known risks). Then freeze/version the framing; do not edit it silently mid-flight.
+5. **Partition Councils:** one run per cut. Put a short **invariants excerpt** in each `request.md`; list the full framing file only for partitions that touch shared interfaces.
+6. **Framing flaws found mid-partition:** stop new partitions; fix/bump framing; re-run only affected partitions. Do not locally fork the shared framing inside one partition artifact.
+7. Optional **integration** Council on the merged plan / conflict list.
+
+Shared mutable contracts: prefer freeze-then-concurrent partitions; if the contract cannot freeze, run dependents sequentially with the contract owner first.
+
+**Packing rules (every run):** `request.md` = short hints only; `artifact.md` = full review target (not a whole-tree dump); list only paths seats must read; set `review_roots` only for CLI `--add-dir` needs; prefer live disk over packed excerpts; never summarize the codebase into the artifact to “save tokens.” Implementation artifacts should be tighter than prose (hot paths / changed files only; path-fenced bodies).
+
+Do **not** silently digest or RAG-chunk `artifact.md` as a token optimizer. Packet hygiene (open-gaps, path prompts, envelopes, churn/same-model skip) is the approved compression.
+
 ## Produce the draft (seat 0)
 
 If artifact selection did not skip rewrite:
@@ -109,6 +131,7 @@ If artifact selection did not skip rewrite:
 2. **Do not** use formal gap IDs (`G<seat>-<n>` / `G0-*`) in the seat-0 draft. Use plain bullets for findings. Seat 1 mints the first tracked IDs.
 3. Record the seat-0 **model family** (see [Same-model skip](#same-model-skip)) in `meta.md`.
 4. If the request is implementation, the artifact may be code (path-fenced file bodies when proposing edits). If it is a question or design, the artifact is the answer. Do not start unrelated project work.
+5. If [Size check and partitioning](#size-check-and-partitioning) applies and the user has not already approved cuts: propose the framing / partition map as seat 0 (or as a pre-cascade step), run Gemini breadth on that cut plan, and **stop for human veto when the input is large** before starting partition Councils.
 
 If rewrite was skipped, still write `meta.md` with the **author model family of the supplied artifact** when known (previous assistant = current chat model family); otherwise `family: unknown` (no same-model skips from seat 0).
 
@@ -213,6 +236,7 @@ For each reviewer in roster order:
 9. Optional **smoke** roster via reconfigure only (1 Cursor + CLI) for plumbing checks; deep reviews keep the full roster.
 10. Omit placeholder packet files; ordinary seats read `open-gaps.md` not `gaps.md`; inline [reviewer-envelope.md](reviewer-envelope.md).
 11. Optional [Terminal calm skip](#terminal-calm-skip) (`terminal_calm_skip`, default off).
+12. [Size check and partitioning](#size-check-and-partitioning): never mega-dump; framing stays size-bounded (multiplied across partitions); prefer `UNCHANGED` over cosmetic full rewrites.
 
 ### Churn guard
 

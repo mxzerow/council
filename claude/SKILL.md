@@ -76,6 +76,35 @@ Council before.
      (**Proceed** / **Reconfigure, then run** / **Reconfigure only**) and, if
      `show_exchange: ask`, whether to include the full exchange.
 
+### Latest-in-family upgrade (every run, before showing the roster)
+
+Roster slugs go stale as vendors ship new versions. For each non-skipped seat,
+bump to the newest version **within the same model family and tier**, never
+across them (Flash stays Flash, Pro stays Pro, Sonnet stays Sonnet, Sol stays
+Sol; a new family name such as "Argon" is **not** a newer Flash). Keep the
+seat's effort/thinking suffix (`-high`, `-medium`) when the new version offers
+it; otherwise take the nearest offered level and say so.
+
+1. Look up the live catalog per command family:
+   - `agy` seats → `agy models` (tab-separated `slug<TAB>label`). Match on the
+     slug stem before the version, e.g. `gemini-3.8-flash-*` → highest
+     `gemini-<major>.<minor>-flash-<effort>`.
+   - `codex` seats → `~/.codex/models_cache.json` if present, else the model
+     list from `codex` itself. Same stem rule (`gpt-<ver>-sol`).
+   - `kind: cursor` seats → the native `agent` catalog or the Task enum, as
+     in [Family slug resolve](dispatch.md). If no catalog is reachable (the
+     `agent` on PATH may be a different tool; check `--help` first), leave the
+     seat as configured.
+2. Compare version tokens numerically (`3.10` > `3.8`), not as strings. If a
+   newer same-family entry exists, use it **for this run** and tell the user
+   in one line (`gemini-3.6-flash-high → gemini-3.8-flash-high`).
+3. Catalog unreachable, or no same-family match → keep the configured slug;
+   never guess a slug and never fall back to a different family or tier.
+4. Do not write `config.yaml` for this. Offer to persist only through
+   [Reconfigure](#reconfigure) when the bump is stable across runs.
+5. A runtime override that **names an exact slug** is honored as written; only
+   unpinned roster seats are upgraded.
+
 ### Artifact selection
 
 | Situation | Action |

@@ -1,135 +1,104 @@
 # Council
 
-A sequential **multi-model review cascade** for [Cursor](https://cursor.com) (`/council`) and an optional [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sibling.
+A sequential **multi-model review** for [Cursor](https://cursor.com) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code), run with `/council`. Both harnesses share one set of rules ([`core.md`](core.md)); only the way a model is called differs.
 
-The current chat model writes the first answer. Configurable reviewers then run **one at a time**, each reading the last artifact, filing gaps, and either revising or leaving it `UNCHANGED`. There is no parallel first-answers pass and no chairman synthesis — the last successful seat's artifact is the result.
+## How a run works
 
-[![skills.sh](https://skills.sh/b/mxzerow/council)](https://skills.sh/mxzerow/council)
+1. **Draft (seat 0).** Opus writes the draft, or you supply one.
+2. **Review, gaps only.** Reviewers from other model families (default: Gemini Argon, then GPT Sol) each read the draft and report gaps. They never rewrite it.
+3. **Integrate, once.** Opus resolves every gap (accept or reject with a reason) and writes the revision. Anything it rejects is printed at the end, with its reason.
+4. **Rewrite, once.** Gemini Flash polishes the result for a reader who is not a specialist, in small chunks, adding short explanations of jargon. A script checks every chunk and keeps the original wording of any chunk that fails.
 
-See [CHANGELOG.md](CHANGELOG.md) for what's changed in the roster and config over time.
+There is no parallel first-answers pass and no chairman synthesis. See [`core.md`](core.md#stages).
 
-## Install (Cursor)
+## What you need
 
-```bash
-npx skills add mxzerow/council -g -a cursor
-```
+| Piece | Requirement |
+|-------|-------------|
+| Orchestrator | Cursor agent chat, or Claude Code |
+| Python 3 | Runs the helper scripts in [`scripts/`](scripts/) (standard library only) |
+| `gemini` seats | [Antigravity CLI](https://antigravity.google/cli) (`agy`), signed in with Google. No API key |
+| `gpt` seats | [Codex CLI](https://github.com/openai/codex) (`codex login`). ChatGPT login uses ChatGPT/Codex quota |
+| `grok` seats | The Grok CLI (`agent` on PATH) |
+| Cursor | Every seat goes through Cursor's own Task tool, so the CLIs above are not needed there |
 
-That copies this skill to `~/.cursor/skills/council` (Windows: `%USERPROFILE%\.cursor\skills\council`). Restart Cursor or start a new agent chat, then run `/council`.
+Recipes for calling each CLI are written for PowerShell on Windows ([`recipes/`](recipes/)).
 
-Manual install:
+## Install
 
-```bash
-git clone https://github.com/mxzerow/council.git ~/.cursor/skills/council
-```
+**Cursor.** Clone this repository to `~/.cursor/skills/council` (Windows: `%USERPROFILE%\.cursor\skills\council`), restart Cursor or start a new agent chat, and run `/council`.
 
-PowerShell:
+**Claude Code.** The Claude Code skill is the `claude/` folder of the same repository, linked into Claude's skills folder so both read one copy of the shared files:
 
 ```powershell
-git clone https://github.com/mxzerow/council.git "$env:USERPROFILE\.cursor\skills\council"
+# Windows (no admin rights needed for a junction)
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\council" -Target "$env:USERPROFILE\.cursor\skills\council\claude"
 ```
 
-**Use `-a cursor` only.** Installing this repo into Claude Code with `npx skills` would load the Cursor orchestrator (it uses Cursor's `Task` tool). Claude Code needs the sibling files under [`claude/`](claude/) — see below.
+```bash
+# macOS / Linux
+ln -s ~/.cursor/skills/council/claude ~/.claude/skills/council
+```
+
+Do **not** copy `claude/SKILL.md` on its own: it finds `core.md`, `config.yaml` and the scripts in the parent folder, and stops if they are missing.
 
 ## Use
-
-In Cursor:
 
 ```
 /council
 /council proceed
 /council this architecture doc
-/council this time only: Grok then Gemini
+/council this time only: models: gemini argon, gpt sol
+/council configure
 ```
 
-Say `/council` with a topic, point it at an existing draft, or ask for a council / wide / multi-model review. The skill confirms the roster unless you already said `proceed` or included the topic in the same message.
+Say `/council` with a topic, point it at an existing draft, or ask for a council or wide review. It confirms the roster unless you already said `proceed` or gave the topic in the same message.
 
-## When to invoke / how to pack
+## Configure
 
-Prefer **one coherent mid-size artifact** over a mega-dump or many tiny councils. Cascade seats do **not** break work up (no subagents; path-scoped reads). Partitioning is an **orchestration** step before the cascade.
+[`config.yaml`](config.yaml) holds one roster for both harnesses:
 
-### When to invoke
-
-Invoke when the deliverable is high-stakes, you want cross-vendor challenge on one coherent artifact, and a draft exists (or seat 0 can write one).
-
-Skip when: trivia / one-liners / single-file nits; answers needed in under a minute; routine work; or the “artifact” would be an unbounded dump (“review this whole feature”).
-
-### How to pack a run
-
-1. **Artifact type:** design/plan prose, or a bounded set of path-fenced files for implementation review (tighter scope than prose — hot paths only).
-2. **Size check:** one human sitting. If not, stop and partition (below).
-3. **`request.md`:** short hints — goal, constraints, non-goals, absolute paths + stable anchors. Do not paste whole modules.
-4. **`artifact.md`:** full text of the draft under review. Prefer live paths for on-disk code; do not duplicate entire trees.
-5. **List only files seats must read** — every listed file is paid by every seat.
-6. **`review_roots`:** only when CLI seats need `--add-dir` for those live paths.
-7. **Exchange:** final-only unless you need the transcript.
-
-### When the problem is too big (cut plan)
-
-| Step | What happens |
-|------|----------------|
-| Framing / cut plan | Seat 0 / chat model proposes goals, interfaces, invariants, non-goals, partition map + links (**size-bounded** framing) |
-| Gemini breadth | Breadth-check the cut plan (standalone or Framing Council with Gemini as breadth-auditor) |
-| Human veto | **Required when input is large** — approve, reject, or reshape before partition Councils |
-| Gate + freeze | No partition runs until framing converged (or human-accepted risks); then freeze/version the framing |
-| Partition Councils | One deep dive per cut; `request.md` carries frozen invariants; full framing listed only if touching shared interfaces |
-| Integration (optional) | Merged plan / conflict list |
-
-**Who proposes cuts (decided):** Seat 0 / chat model → Gemini breadth on the cut plan → **human veto if input is large**.
-
-Keep the framing doc small: it is multiplied across seats × partitions. Prefer concurrent partitions against a **frozen** shared contract; if the contract cannot freeze, run dependents sequentially.
-
-Anti-patterns: mega-`artifact.md`; parallel micro-councils with no framing; starting partitions while framing still has open blocking gaps; summarizing the codebase into the artifact to “save tokens”; expecting cascade seats to sub-delegate around context limits.
-
-Council already does **packet hygiene** (short `request.md`, path-only prompts, `open-gaps.md`, compact envelopes, churn/same-model skip). It does **not** silently compress or summarize `artifact.md`.
-
-## What you need
-
-| Seat | Requirement |
-|------|-------------|
-| Orchestrator (seat 0) | Cursor agent chat |
-| Cursor reviewers (`kind: cursor`) | Cursor account usage for that model |
-| Gemini (`command: agy`) | [Antigravity CLI](https://antigravity.google/cli) signed in with Google — **no API key** |
-| GPT (`command: codex`) | [Codex CLI](https://github.com/openai/codex) (`codex login`). ChatGPT login uses ChatGPT/Codex quota |
-
-Default roster (interleaved since 2026-09-12 — Gemini is cheap enough to run every other seat): **Gemini (breadth-auditor) → Claude (Cursor) → Gemini → Codex CLI (GPT) → Gemini → Grok → Gemini**. Reconfigure in chat (`/council configure`) or edit [`config.yaml`](config.yaml).
-
-CLI recipes in [`models.md`](models.md) are written for **PowerShell**. Cursor `Task` seats work on any OS. Gemini/Codex seats on macOS/Linux need the equivalent PATH and preflight commands.
-
-## Claude Code sibling
-
-Claude Code cannot call Cursor's `Task` tool. [`claude/SKILL.md`](claude/SKILL.md) is a sibling orchestrator that drives Cursor's `agent` CLI, plus `agy`/`gemini` and `codex`, using the **same** `config.yaml` / `models.md` / reviewer contracts.
-
-1. Install the Cursor skill first (shared files).
-2. Copy the sibling:
-
-```powershell
-$dest = Join-Path $env:USERPROFILE ".claude\skills\council"
-New-Item -ItemType Directory -Force $dest | Out-Null
-Copy-Item "$env:USERPROFILE\.cursor\skills\council\claude\SKILL.md" $dest
-Copy-Item "$env:USERPROFILE\.cursor\skills\council\claude\dispatch.md" $dest
+```yaml
+seats:
+  - family: gemini     # gemini | gpt | claude | grok | composer
+    line: argon        # the model line; the version is resolved to the newest of that line
+    effort: medium
+    role: breadth-auditor   # reviewer (default) | breadth-auditor | rewriter
 ```
 
-```bash
-mkdir -p ~/.claude/skills/council
-cp ~/.cursor/skills/council/claude/SKILL.md ~/.claude/skills/council/
-cp ~/.cursor/skills/council/claude/dispatch.md ~/.claude/skills/council/
-```
+A seat names a model family and line, never a version: the newest version of that line is picked from the live catalog on every run, and a different line is never substituted (Flash never becomes Argon). Add `pin: <exact slug>` to freeze a seat. An unrecognized `role` is a config error. A family with no way to be called in the current harness is skipped. Claude Code skips `claude` seats (same family as the orchestrator).
 
-Then invoke `/council` in Claude Code. If the shared Cursor files are missing, the sibling stops rather than inventing a second roster.
+Machine-specific overrides go in `config.local.yaml` (gitignored; see [`config.local.example.yaml`](config.local.example.yaml)), for example `runs_dir`. Run folders default to `runs/` next to `config.yaml`.
 
 ## Layout
 
-| File | Role |
+| Path | Role |
 |------|------|
-| [`SKILL.md`](SKILL.md) | Cursor orchestrator |
-| [`config.yaml`](config.yaml) | Roster and defaults (shared) |
-| [`models.md`](models.md) | Model catalog and CLI recipes |
-| [`reviewer-envelope.md`](reviewer-envelope.md) | Compact envelope for ordinary seats |
-| [`reviewer-prompt.md`](reviewer-prompt.md) | Full contract (breadth-auditor / implementation) |
-| [`claude/SKILL.md`](claude/SKILL.md) | Claude Code orchestrator |
-| [`claude/dispatch.md`](claude/dispatch.md) | Claude Code CLI invocation |
+| [`core.md`](core.md) | The shared rules: roster, stages, parsing, model resolution, return format |
+| [`SKILL.md`](SKILL.md) | Cursor skill: paths, Start, how a seat is called through Task |
+| [`claude/SKILL.md`](claude/SKILL.md) | Claude Code skill: Start, the CLI mapping, the Opus integration stage |
+| [`config.yaml`](config.yaml) | The roster and defaults (shared) |
+| [`reviewer-envelope.md`](reviewer-envelope.md), [`reviewer-prompt.md`](reviewer-prompt.md) | What a reviewer seat is told |
+| [`catalog.md`](catalog.md) | Cursor Task model reference |
+| [`recipes/`](recipes/) | Per-CLI call recipes for Claude Code (`common`, `agy`, `codex`, `grok`) |
+| [`partitioning.md`](partitioning.md) | What to do when the input is too big for one cascade |
+| [`scripts/`](scripts/) | `council_parse.py` (reply parser and run state), `council_resolve.py` (newest model version), `council_rewrite.py` (safe chunked rewrite) |
 
-Run folders under `runs/` are local working state (prompts, artifacts, CLI logs). They are gitignored and must not be published — they can contain the text you sent through Council.
+## Tests
+
+```bash
+cd scripts && python -B -m unittest discover -p "test_*.py"
+```
+
+The scripts are what keeps the model-written parts honest: replies are parsed and bookkept by code, a reviewer cannot change the artifact, and a rewritten chunk is thrown away if it loses a number, a heading, a negation or any protected text.
+
+## Status
+
+Verified live in Claude Code on 2026-10-23 (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite). The Cursor path (Task seats writing their reply to a file, the Task model list, an Opus Task seat, and whether the Task list offers Gemini Flash) has not been run yet; the first Cursor run is the check.
+
+## Run data
+
+`runs/` holds working state (prompts, artifacts, CLI logs). It is gitignored and must not be published: it can contain the text you sent through Council.
 
 ## License
 

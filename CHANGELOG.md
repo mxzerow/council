@@ -13,6 +13,37 @@ PR (not backfilled later). One entry per PR, dated by merge date, using
 `Added` / `Changed` / `Fixed` / `Removed` sections as needed. Skip trivial
 wording fixes that don't change behavior.
 
+## 2026-10-23 — Unify the Cursor and Claude Code skills; gaps-only reviewers, Opus integration, Flash rewrite
+
+### Changed
+
+- **One set of rules.** The shared cascade logic moved into `core.md`; `SKILL.md` (Cursor) and `claude/SKILL.md` now hold only what differs: root resolution, Start, and how a seat is called.
+- **One roster.** `reviewers` and `cursor_reviewers` are replaced by a single `seats:` list (family, line, effort, role, label, pin). Default: Gemini Argon (breadth-auditor) → GPT Sol → Gemini Flash (rewriter). Opus drafts and integrates as stages, not seats. A pre-change roster is in git history (commit `5ccf6c1`).
+- **Reviewers are gaps-only.** A reviewer's Revised must be `UNCHANGED`; one Opus integration pass resolves every gap and prints each rejection with its reason at the end.
+- **Strict `role` validation** in both harnesses (previously Cursor was strict and Claude Code ignored typos).
+- **Models are resolved, not pinned.** A seat stores a family and line; the newest version of that line is picked from the live catalog each run, never crossing lines. A model the server rejects is skipped for 7 days; the last working model is the fallback when a catalog is unreachable.
+- Run data now lives under `runs/` next to `config.yaml` (override with `runs_dir` in `config.local.yaml`). The old `claude/runs/` (59 runs) was moved there.
+- `models.md` is split: `catalog.md` for Cursor, `recipes/` for each Claude Code CLI. A default run now loads about 42 KB in Claude Code (was about 61 KB) and about 35 KB in Cursor (was about 79 KB).
+- The Grok seat is called through the Grok CLI; the old Cursor `agent` recipe no longer applies.
+
+### Added
+
+- `scripts/council_parse.py`: parses replies, mints gap IDs, applies STATUS, restores dropped dissent, and renders the packet files from `gaps.json`. The orchestrator reads a one-line summary instead of the full reply.
+- `scripts/council_resolve.py`: newest-version-of-the-same-line resolver, rejected-model cooldown, last-good fallback, failure classifier.
+- `scripts/council_rewrite.py`: masks protected text, rewrites in small chunks, checks every chunk, falls back per chunk or for the whole artifact, and reports every explanation added.
+- `partitioning.md` (oversize inputs), `config.local.example.yaml`, a minimum-review rule, and tests for all three scripts.
+
+### Removed
+
+- The churn guard, terminal-calm skip and breadth-auditor content-loss guard (with their config keys): with gaps-only reviewers there is nothing left for them to guard.
+- The legacy `## Gaps` reply fallback.
+- `claude/dispatch.md` (its mapping moved into `claude/SKILL.md`, its Grok recipe into `recipes/grok.md`).
+
+### Fixed
+
+- Codex seats failed with "blocked by policy" because `--ignore-user-config` dropped the Windows sandbox setting; the recipe now passes `-c windows.sandbox="unelevated"`.
+- Three independent Codex reviews of the new scripts found and drove fixes for 13 blocking defects (state races, a model-rejection cache poisoned by auth errors, dated slugs outranking newer versions, placeholders colliding with document text, indented code left editable, version and sign changes going undetected, and others); the Claude Code path was then verified with a full live run.
+
 ## 2026-09-13 — Interleave Gemini into every other seat; redefine churn-guard ([#3](https://github.com/mxzerow/council/pull/3), supersedes closed [#2](https://github.com/mxzerow/council/pull/2))
 
 ### Changed

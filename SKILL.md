@@ -101,11 +101,11 @@ A seat has no slug. Use `family` directly. Treat the seat's `line` and `effort` 
    - Keep candidates that contain the seat's `line` token. If none do, skip (`rejected-family`); never cross lines.
    - Prefer the **highest** version number among them (`5.5` over `5`, `4.6` over `4.5`).
    - Then score shared hyphen-separated tokens with the `effort` (`high`, `medium`, `thinking`, …). Highest score wins.
-   - Tie-break: [models.md](models.md) catalog table order, then Task enum order.
+   - Tie-break: [catalog.md](catalog.md) table order, then Task enum order.
 6. If the dispatched slug differs from a `pin`, append `failures.md` with reason `family-remap` (`wanted <pin>, dispatched <enum-slug>`). That is **not** a skip.
 7. If the call is rejected, skip `rejected-slug` and **do not** try another candidate.
 
-Do **not** reorder the `models.md` catalog table to mirror roster order; it is the family-remap tie-break.
+Do **not** reorder the [catalog.md](catalog.md) table to mirror roster order; it is the family-remap tie-break.
 
 ## Return (Cursor)
 
@@ -113,7 +113,7 @@ Shared: [core.md](core.md#return). Cursor exchange handling: if exchange was req
 
 ## Reconfigure
 
-Read [models.md](models.md). Then:
+Read [catalog.md](catalog.md). Then:
 
 1. Ask how many seats (minimum 1; warn above `max_reviewers`).
 2. For each seat, in order, ask `family`, `line`, `effort` and an optional `role`. Default the first Gemini seat to `role: breadth-auditor` unless the user opts out.

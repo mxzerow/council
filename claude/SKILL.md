@@ -29,12 +29,13 @@ From that shared root, read:
 - `config.yaml` — the `seats:` roster, `show_exchange`, `runs_dir`
 - `reviewer-envelope.md` — envelope contract (inline it; never list `meta.md`)
 - `reviewer-prompt.md` — breadth-auditor addendum
-- `models.md` — model catalog + `agy` and Codex recipes
+- `recipes/common.md` and, **only for the transports the run uses**, `recipes/agy.md` (gemini), `recipes/codex.md` (gpt), `recipes/grok.md` (grok)
 - `scripts/council_parse.py` — envelope parser (run with `python -I`)
+- `partitioning.md` — only when the input is too large for one cascade
 
 If none of those roots exist, stop and tell the user Council's shared files aren't installed — do not vendor a local copy silently.
 
-Read [dispatch.md](dispatch.md) (PowerShell recipes for the Grok CLI, `agy` and `codex`) before dispatching the first seat.
+Read [recipes/common.md](../recipes/common.md) before dispatching the first seat, then the recipe for each transport the run actually uses.
 
 Cost: Codex CLI seats use ChatGPT/Codex quota when `codex login status` reports `Logged in using ChatGPT`; Grok CLI and `agy` seats use their own accounts. Mention cost once if the user hasn't run Council before.
 
@@ -71,7 +72,7 @@ The user may suggest a different roster for this run only, as part of the `/coun
 
 Resolution:
 
-1. Resolve each named model as a seat (`family` + `line`, e.g. `gemini argon`, `gpt sol`) against the live catalog per Latest-in-family, or as an exact slug (then treated as a `pin`; check `models.md` or `agy models`). Not found → tell the user it isn't resolvable; leave that seat out of this run rather than guessing a slug.
+1. Resolve each named model as a seat (`family` + `line`, e.g. `gemini argon`, `gpt sol`) against the live catalog per Latest-in-family, or as an exact slug (then treated as a `pin`; check `agy models` or the recipe's catalog command). Not found → tell the user it isn't resolvable; leave that seat out of this run rather than guessing a slug.
 2. An override **replaces** the roster for this run, in the order given — unless the request is clearly additive ("also run Gemini", "add a Grok pass"), in which case append to the default roster instead.
 3. [Same-model skip](#same-model-skip-claude-code) still applies — naming a Claude-family model in an override does not bypass it.
 4. Never write `config.yaml` for a one-shot override. Only persist via [Reconfigure](#reconfigure), and only when the user says to save.
@@ -102,10 +103,10 @@ The default roster (Gemini Argon → Claude Opus → GPT Sol → Gemini Argon) t
 
 ## Dispatch (Claude Code)
 
-Read [dispatch.md](dispatch.md). For each seat core.md says to dispatch:
+For each seat core.md says to dispatch:
 
 1. Write `seat-<n>-prompt.md` (fields per core.md § Cascade loop; state that the seat is **gaps only**).
-2. Run the seat's transport recipe (Grok CLI in `dispatch.md`; `agy` and `codex` in `models.md`). Before the first seat of each transport, run that transport's preflight. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-codex`); the others still run.
+2. Run the seat's transport recipe (`recipes/agy.md`, `recipes/codex.md` or `recipes/grok.md`, built on `recipes/common.md`). Before the first seat of each transport, run that transport's preflight. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-codex`); the others still run.
 3. Save the raw reply to `seat-<n>-<slug>.md` (Codex: the fresh `-o` file) and run the parser; read only its JSON summary (core.md § Envelope parser). On exit 3 or 4 retry once, then re-run with `--final-attempt`; never a third dispatch.
 4. If `role: breadth-auditor` minted blocking gaps, later seats must STATUS them (the parser enforces this).
 
@@ -121,9 +122,9 @@ Shared: core.md § Return. If the full exchange was requested, append the transc
 
 `config.yaml` is shared with Cursor — edits here change both orchestrators' rosters (the single `seats:` list). When persisting, preserve `role: breadth-auditor` on Gemini unless the user explicitly removes it.
 
-1. Read `models.md` for the catalog; the live catalogs (`agy models`, `~/.codex/models_cache.json`, `agent models`) are the source of truth if `models.md` looks stale — flag the mismatch, don't silently trust either.
+1. The live catalogs (`agy models`, `~/.codex/models_cache.json`, `agent models`) are the source of truth for available models; list them for the user.
 2. Ask seat count (minimum 1), then for each seat in order: `family`, `line`, `effort`, optional `role`. GPT is dispatched through the **Codex CLI** here.
-3. Probe **that seat's transport** per `models.md` / `dispatch.md` before accepting (`agy` vs `codex` vs Grok CLI independently). On failure, ask whether to keep it anyway or pick something else. Default `role: breadth-auditor` for the first Gemini seat.
+3. Probe **that seat's transport** (its recipe's preflight) before accepting (`agy` vs `codex` vs Grok CLI independently). On failure, ask whether to keep it anyway or pick something else. Default `role: breadth-auditor` for the first Gemini seat.
 4. Ask whether to persist (writes the shared `config.yaml`) and the `show_exchange` default.
 5. If persisted, add an entry to `CHANGELOG.md` (dated, `Changed`/`Added`/`Removed` as fits) — shared with Cursor's sibling and the only consumer-facing record of what changed. Skip only for a reconfigure that changes nothing observable.
 6. Run the cascade unless they chose reconfigure-only.

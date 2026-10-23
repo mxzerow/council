@@ -46,7 +46,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 |-----|---------|
 | `show_exchange` | `ask` |
 | `runs_dir` | `<skill-root>\runs` — resolved as: `config.local.yaml` (gitignored, machine-specific) > `config.yaml` > this default. Created if missing. Cursor Task seats must be able to read it; keep it inside the workspace/skill tree until that is verified |
-| `max_reviewers` | `7` (raised from `5` on 2026-09-12 to match the interleaved default roster — if this key is ever removed from `config.yaml`, falling back to `5` would silently truncate the 7-seat roster and drop Grok plus the final Gemini pass) |
+| `max_reviewers` | `7` (cap on the number of `seats`) |
 | `churn_guard` | `2` |
 | `terminal_calm_skip` | `false` |
 | `cli_timeout_sec` | `180` |
@@ -56,23 +56,18 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 **Numeric validation (Start step 2):** `max_reviewers`, `cli_timeout_sec`, `run_retention_count`, `run_retention_days`, and `stall_checkin_sec` must be positive integers (`>= 1`). `churn_guard` must be an integer `>= 0` (`0` disables churn-stop **and** terminal-calm skip). `terminal_calm_skip` must be `true` or `false` (default `false`). On invalid values, stop and ask the user to fix or reconfigure.
 
-If `reviewers` is longer than `max_reviewers`, warn, use the first N seats, continue unless the user insists on the full list.
+If `seats` is longer than `max_reviewers`, warn, use the first N seats, continue unless the user insists on the full list.
 
-**Cursor roster:** this orchestrator reads `cursor_reviewers`, not `reviewers`; `reviewers` belongs to the Claude Code sibling. Every `cursor_reviewers` seat must be `kind: cursor` and runs through Task. Never dispatch a `kind: cli` seat or shell out to `agy`, `gemini`, `codex`, or `agent` from Cursor. Where this file describes `reviewers`, CLI seats, agy, Codex, or Grok, that is the Claude Code roster; apply the same rules to `cursor_reviewers` (default Gemini breadth-auditor → Opus → Sol → Gemini). Reconfigure writes `cursor_reviewers`.
+**Roster:** this orchestrator reads `seats:` (schema, strict `role` values, and migration from the old `reviewers` / `cursor_reviewers` keys: [core.md](core.md#roster-seats)). **Transport:** every seat runs through Task, whatever its family. Never shell out to `agy`, `gemini`, `codex`, `grok` or `agent` from Cursor. Reconfigure writes `seats:`.
 
-Optional per-reviewer keys:
+Optional per-seat keys: `role` (`reviewer` | `breadth-auditor` | `rewriter`; a `rewriter` seat is skipped as `rewriter-not-implemented` until step 7), `label`, `pin` (exact Task slug), `effort`, and `validation_critical: true` (churn-stop must not skip this seat; removed with the churn guard in step 5).
 
-- `validation_critical: true` — churn-stop must not skip this seat
-- `role: breadth-auditor` — allowed on any `kind`; selects the breadth contract and the content-loss guard. Orthogonal to `kind`: a Cursor seat may carry it; a CLI seat without it is an ordinary critical reviewer. Documented values today: `breadth-auditor` only.
-- CLI only: `model`, `effort` (`low` \| `medium` \| `high`) — passed through to `agy` / Codex (`-c model_reasoning_effort`) when set
-- CLI only: `command` — `agy` | `gemini` | `codex` (required for `kind: cli` unless Gemini/Antigravity by label)
-
-**Default roster intent (interleaved since 2026-09-12):** Gemini first as `breadth-auditor` (copy-through Revised; Gaps seed IDs), then alternates with each paid seat — Claude (Cursor) → Gemini → **Codex CLI (GPT)** → Gemini → Grok → Gemini. Gemini/agy is cheap enough to run every other seat instead of once; only the first Gemini seat carries `role: breadth-auditor` — the interleaved passes are ordinary critical reviewers. GPT is not a Cursor Task seat by default. Grok is the usual churn-skip candidate after two calm non-Gemini seats (Claude then Codex, typically). Only the four Gemini seats are guaranteed to run unconditionally on every invocation — Codex counts toward the churn-guard streak like any other non-Gemini seat now (see [Churn guard](#churn-guard)). At the default `churn_guard: 2`, its position ahead of Grok means it's never itself the seat that actually gets skipped; **that stops being true at `churn_guard: 1`**, where a calm Claude alone fires churn-stop before Codex has even run, skipping Codex too.
+**Default roster:** Gemini Argon (`breadth-auditor`) → Claude Opus → GPT Sol → Gemini Argon (final pass). In Cursor all four run unless Same-model skip removes the seat matching seat 0's family.
 
 ## Start
 
 1. Do **not** call `rename_chat` unless the user explicitly asked to rename this chat. Skipping is not a blocker.
-2. Read [config.yaml](config.yaml). Validate: `cursor_reviewers` is a non-empty list; each entry has `kind: cursor` (a `cli` entry is invalid here) and a `model`; `show_exchange` is `ask` | `always` | `never`; `terminal_calm_skip` is `true` or `false` when present (default `false`); numeric keys per [Config defaults](#config-defaults); when `role` is present it must be a documented value (`breadth-auditor` today) — unrecognized `role` is invalid. On invalid config, stop and ask the user to fix or reconfigure.
+2. Read [config.yaml](config.yaml). Validate: `seats` is a non-empty list (if the old `reviewers` / `cursor_reviewers` keys are present and `seats` is not, stop and point to the migration rule in [core.md](core.md#roster-seats)); each seat has a known `family` and a `line`; `role` is a documented value (`reviewer`, `breadth-auditor`, `rewriter`) — an unrecognized `role` is invalid; `show_exchange` is `ask` | `always` | `never`; `terminal_calm_skip` is `true` or `false` when present (default `false`); numeric keys per [Config defaults](#config-defaults). On invalid config, stop and ask the user to fix or reconfigure.
 3. Show the roster (count, labels, order) in one short list. Apply `max_reviewers` as above.
 4. Confirm unless the user already decided:
 
@@ -109,17 +104,16 @@ Shared: see [core.md](core.md#run-folder). Cursor run folders live under `runs_d
 
 Shared rule and family table: see [core.md](core.md#same-model-skip).
 
-**Effective paths** (default roster Gemini → Claude → Gemini → Codex → Gemini → Grok → Gemini, interleaved since 2026-09-12; successful dispatches, same-model-skip only — this table doesn't cover churn-stop, which is conditional on runtime calm/gaps rather than deterministic). Gemini-first breadth Gaps are normal `G1-*` IDs — later seats must STATUS and may incorporate them. All four Gemini seats are always dispatched regardless of churn state; Codex now counts toward the churn-guard streak like Claude and Grok (see [Churn guard](#churn-guard)). At the default `churn_guard: 2`, its position ahead of Grok means it's never itself the seat that gets skipped on this roster — but that's specific to `churn_guard: 2`; at `churn_guard: 1`, Codex is skippable too.
+**Effective paths** (default `seats:` roster Gemini Argon → Claude Opus → GPT Sol → Gemini Argon; same-model-skip only. This does not cover churn-stop, which depends on runtime calm):
 
 | Seat-0 family | Effective reviewer path |
 |---|---|
-| Claude | Gemini → Gemini → Codex → Gemini → Grok → Gemini (only the Claude reviewer is same-model-skipped; the other three Gemini passes are unaffected since same-model skip only removes seats matching seat-0's own family) |
-| GPT / Codex | Gemini → Claude → Gemini → Gemini → Grok → Gemini (Codex reviewer same-model-skipped) |
-| Grok | Gemini → Claude → Gemini → Codex → Gemini → Gemini (Grok same-model-skipped; Codex and all Gemini seats still run) |
-| Gemini | Claude → Codex → Grok as churn permits (all four Gemini reviewer seats same-model-skipped — same effective path as before interleaving, since removing every Gemini seat leaves the original three) |
-| Composer or unknown | Gemini → Claude → Gemini → Codex → Gemini → Grok → Gemini; Grok may churn-skip after two calm **non-Gemini** seats (typically Claude then Codex, at the default `churn_guard: 2`) |
+| Claude | Argon → Sol → Argon (Opus skipped) |
+| GPT / Codex | Argon → Opus → Argon (Sol skipped) |
+| Gemini | Opus → Sol (both Argon seats skipped) |
+| Grok, Composer or unknown | Argon → Opus → Sol → Argon (nothing skipped) |
 
-A Claude-driven run is **not** “Claude → GPT convergence”: after the first Gemini seat, the remaining reviewers when Claude is skipped are Gemini → Codex → Gemini → Grok → Gemini — five seats, not two. The Gemini `role: breadth-auditor` seat and the Codex CLI seat do **not** bypass same-model skip; neither do the three interleaved ordinary Gemini seats.
+The Gemini `role: breadth-auditor` seat and the GPT seat do **not** bypass same-model skip.
 
 ## Cascade
 
@@ -133,7 +127,7 @@ For each reviewer in roster order:
 
 1. If churn-stop already triggered, skip this seat when its resolved family is **not** `gemini` (redefined 2026-09-12 — was `kind: cursor`; Codex now counts) **unless** `validation_critical: true` or `request.md` names that seat/label for validation/observation. Never skip a remaining Gemini seat after churn-stop. See [Churn guard](#churn-guard). Apply [Terminal calm skip](#terminal-calm-skip) when `terminal_calm_skip: true` before dispatching a trailing Cursor seat (note: terminal-calm-skip's own trigger condition is unchanged by this redesign and is currently unreachable on this roster — see that section).
 2. Apply [Same-model skip](#same-model-skip).
-3. **Cursor seats:** resolve `model` with [Family slug resolve](#family-slug-resolve). If no family member is on the Task enum, skip (`rejected-family`). Do not skip only because the exact catalog slug is missing.
+3. **Seats:** resolve the seat (`family`, `line`, `effort`, or `pin`) with [Family slug resolve](#family-slug-resolve). If no family member is on the Task enum, skip (`rejected-family`). Do not skip only because an exact slug is missing.
 4. Refresh `artifact.md`, `gaps.md`, `open-gaps.md`, `verdicts.md`, `unresolved.md`. Snapshot pre-seat artifact for churn compare. Derive **mandatory STATUS IDs** = blocking IDs whose latest `verdicts.md` entry is not `addressed`. List those IDs as a compact comma-separated header. Do not require STATUS for closed `addressed` IDs (inherit unless the seat reopens them).
 5. Dispatch Cursor or CLI seat (below).
 6. Include in the Task/CLI prompt: **seat index**, **label**, **total seats**, **run mode**, **seat kind**, **resolved reviewer family**, **configured role** (if any), **open blocking IDs** (comma-separated; not full gap prose), absolute paths to packet files (never `meta.md`; never placeholder-only files; ordinary seats: inlined envelope, not a Read of `reviewer-prompt.md`), and for implementation mode the **allowed proposal/application roots**. Do **not** paste `artifact.md` or skill file bodies into the Task/`-p` argv.
@@ -149,13 +143,15 @@ For each reviewer in roster order:
 5. Late Cursor seats: stabilize; Gaps `- none` + `UNCHANGED` when nothing material. **Carve-out:** for `role: breadth-auditor`, Revised defaults to `UNCHANGED`, but Gaps must still report breadth findings so later seats can address them (`- none` means genuinely nothing found).
 6. `show_exchange: ask` → final-only when ambiguous (no duplicate full transcript in chat).
 7. CLI preflight **per command family** before that family's first seat (`agy`/`gemini` vs `codex`; fail independently).
-8. Keep the default 7-seat roster (Gemini/agy interleaved 4x since 2026-09-12); do not drop Claude/Codex/Gemini/Grok for cost by default.
+8. Keep the default 4-seat roster; do not drop Claude, GPT or Gemini seats for cost by default (cost cuts come from path-only prompts and a smaller shared core, not fewer reviewers).
 9. Optional **smoke** roster via reconfigure only (1 Cursor + CLI) for plumbing checks; deep reviews keep the full roster.
 10. Omit placeholder packet files; ordinary seats read `open-gaps.md` not `gaps.md`; inline [reviewer-envelope.md](reviewer-envelope.md).
 11. Optional [Terminal calm skip](#terminal-calm-skip) (`terminal_calm_skip`, default off).
 12. [Size check and partitioning](core.md#size-check-and-partitioning): never mega-dump; framing stays size-bounded (multiplied across partitions); prefer `UNCHANGED` over cosmetic full rewrites.
 
 ### Churn guard
+
+_Legacy (removed in step 5): examples below describe the pre-step-3 7-seat roster._
 
 `churn_guard: 0` disables churn-stop.
 
@@ -177,6 +173,8 @@ After each **successful** parse (and after content-loss acceptance when applicab
 
 ### Terminal calm skip
 
+_Legacy (removed in step 5): references to `kind` and the 7-seat roster below predate the `seats:` schema._
+
 `terminal_calm_skip: false` (default) disables this feature. `churn_guard: 0` disables it as well. This is **orthogonal** to [Churn guard](#churn-guard) and uses a **separate** `terminal_calm_streak`. Cursor-only; the Claude sibling documents it as not applicable.
 
 After each **successful** parse (same calm test as churn, except **any kind** including CLI may increment `terminal_calm_streak`):
@@ -193,7 +191,9 @@ CLI calm **may** increment `terminal_calm_streak` even for seats excluded from `
 
 Cursor seats match **provider family**, not an exact Task slug. Opus 5 Extra High and Sonnet Medium are the same seat family (`claude`). Grok 4.6 High and Grok 4.5 High are the same family (`grok`).
 
-For a configured `model` (and its label):
+A seat has no slug. Use `family` directly as the family. For steps 4-5 treat the seat's `line` and `effort` as the configured tokens (no exact-slug match), and when neither side has a `\d+\.\d+` version token, prefer the **highest** version number among candidates that share the `line`. A `pin` is the configured slug and is dispatched verbatim when listed. Never pick a candidate from a different `line`.
+
+For a configured slug (a `pin`, or the synthesized `line`/`effort` tokens) and its label:
 
 1. Map it to a family using [Same-model skip](#same-model-skip). `inherit` is never a reviewer candidate.
 2. Collect Task `model` enum values with that same family.
@@ -217,13 +217,17 @@ Write `seat-<n>-<dispatched-slug>.md` (the slug actually passed to `Task`).
 
 CLI seats (`agy` / `gemini` → family `gemini`; `codex` → family `gpt`) are not Task-routed and do not use Family slug resolve.
 
-### Cursor seat (`kind: cursor`)
+### Task seat (all families)
+
+In Cursor every seat is dispatched this way.
 
 1. `Task` with `subagent_type: generalPurpose`, `model` = **resolved** slug, `run_in_background: false`.
 2. **Always read-only:** instruct the seat **not** to Write, Edit, Delete, or otherwise mutate the workspace — in both `review-only` and `implementation` modes. Implementation proposals belong only in Revised output (path-fenced file bodies). The orchestrator applies them after a successful parse (see [Apply implementation Revised](core.md#apply-implementation-revised)).
 3. Parse per [Parse and retry](core.md#parse-and-retry). Retry = **new** Task (do not assume resume), also read-only.
 
 ### CLI seat (`kind: cli`)
+
+_Not used by Cursor (every seat is dispatched through Task). Kept as reference for the Claude Code sibling until step 5 removes it._
 
 Branch on `command` (and label). Maintain **per-command-family** preflight state for the run: `agy`/`gemini` vs `codex` fail independently.
 
@@ -300,7 +304,7 @@ Read [models.md](models.md). Then:
 2. Ask which catalog entry for each seat, in order. Mention optional smoke roster (1 Cursor + CLI) for plumbing-only checks. When a Gemini/Antigravity CLI seat is chosen, default its `role` to `breadth-auditor` unless the user explicitly opts out. When the user picks **ChatGPT/GPT**, default to **Codex CLI** (`command: codex`); offer Cursor Task `gpt-5.6-sol-medium` only as an explicit fallback.
 3. If Gemini/Antigravity is chosen, run that family's CLI preflight from [models.md](models.md). If Codex is chosen, run Codex preflight (same resolved launcher). If missing/failed, print install + login steps for **that** family and ask whether to keep the seat or pick another. A failed probe: do **not** persist a broken seat unless the user explicitly insists. Do not treat a Gemini probe failure as a Codex failure (or vice versa).
 4. Ask whether to persist and the `show_exchange` default (`ask` / `always` / `never`).
-5. Write [config.yaml](config.yaml) if they chose to persist: keep hygiene keys; preserve comments on `churn_guard: 0` and `terminal_calm_skip`; **preserve** any existing `role: breadth-auditor` (and related roster comments) unless the user explicitly removes that seat or role — do not silently demote Gemini to an ordinary CLI reviewer. One-shot overrides do not persist unless they say to save.
+5. Write the `seats:` list of [config.yaml](config.yaml) if they chose to persist: keep hygiene keys; preserve comments on `churn_guard: 0` and `terminal_calm_skip`; **preserve** any existing `role: breadth-auditor` (and related roster comments) unless the user explicitly removes that seat or role — do not silently demote Gemini to an ordinary CLI reviewer. One-shot overrides do not persist unless they say to save.
 6. If persisted, add an entry to [CHANGELOG.md](CHANGELOG.md) (dated, `Changed`/`Added`/`Removed` as fits) describing the roster/config change — this file is shared with the Claude sibling and is the only consumer-facing record of what changed, since this repo has no version pins or release notifications. Skip only for a reconfigure that changes nothing observable (e.g. re-persisting the same roster).
 7. Run the cascade unless they chose **Reconfigure only**.
 

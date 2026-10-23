@@ -17,115 +17,79 @@ shared with Cursor's own skill, so their recipes live in the shared file and
 this file just summarizes the branching — don't invent a second conflicting
 recipe for them here.
 
-The **native `agent` CLI (`kind: cursor` seats) recipe lives entirely in this
-file, not `models.md`, on purpose:** it's Claude-side-only. Cursor's own
-orchestrator never shells out to `agent` — it has native `Task` tool access —
-so this recipe has no reason to live in a file shared with Cursor's skill.
+The **Grok CLI (`grok` seats) recipe lives entirely in this file, not `models.md`,
+on purpose:** it's Claude-side-only. Cursor's own orchestrator never shells
+out — it has native `Task` tool access — so this recipe has no reason to live
+in a file shared with Cursor's skill.
 
-## CLI command-family mapping
+## Transport mapping
 
-| Config `command` / label | Family | Preflight bucket | Dispatch |
+| Seat `family` | Transport | Preflight bucket | Dispatch |
 |---|---|---|---|
-| `kind: cursor`, native Cursor CLI | matches `models.md`'s family table | `agent` | Recipe below, this file |
-| `command: agy` / `gemini`, Antigravity/Gemini | `gemini` | `agy`/`gemini` | Antigravity recipe in `models.md` |
-| `command: codex`, Codex CLI / GPT CLI | `gpt` | `codex` | Codex recipe in `models.md` |
+| `gemini` | `agy` (legacy `gemini`) | `agy`/`gemini` | Antigravity recipe in `models.md` |
+| `gpt` | `codex` | `codex` | Codex recipe in `models.md` |
+| `grok` | Grok CLI (`agent` on PATH) | `agent` | Recipe below, this file |
+| `claude` | none (same family as the orchestrator) | — | skipped by Same-model skip |
+| `composer` | none | — | skipped, `no-transport` |
 
 Preflight failures skip **only that bucket** (`cli-preflight-agent` /
 `cli-preflight-agy` / `cli-preflight-codex`). A failed probe in one bucket must
 not skip the other two.
 
-## `kind: cursor` seat — native Cursor `agent` CLI
+## `grok` seat — Grok CLI (`agent`)
 
-This is the substitute for Cursor's own `Task` tool with a `model` slug. It
-was verified live: `agent -p --model <slug> --output-format json "<prompt>"`
-genuinely dispatches to that vendor's model (confirmed cross-vendor identity
-responses for `cursor-grok-4.6-high-fast`, `gpt-5.6-sol-medium`, and
-`claude-opus-5-thinking-high` in one test session) and returns clean JSON.
+On this machine `agent` is the **Grok Build CLI** (`~/.grok/bin/agent.exe`,
+`grok 1.0.62` when verified 2026-10-23), not Cursor's `agent`. The old Cursor
+recipe (`--mode plan --trust --workspace`) fails with `unexpected argument
+'--mode'`; do not use it. This recipe is Claude-side-only (Cursor dispatches
+Grok through Task), which is why it lives here and not in `models.md`.
 
-**Last verified:** 2026-09-06, `agent` version `2026.09.02-c22c1a3`. Confirmed
-that day: all flags below (`-p`, `--mode`, `--trust`, `--workspace`, `--model`,
-`--output-format`) still parse and behave as documented, including reading a
-real file inside the trusted `--workspace` with no permission gap (the
-`--add-dir`-vs-project-trust issue that hit `agy` the same day does **not**
-reproduce here). This was checked specifically *because* `agy`'s flag surface
-had silently drifted (`--workspace`/`--trust` removed, `--print` calling
-convention changed) between when Council was built and that date — `agent`
-had not drifted, but nothing would have caught it early if it had, which is
-why the preflight below exists now. If `agent --version` reports anything
-other than `2026.09.02-c22c1a3` on the machine you're running from, treat this
-recipe as **unverified since that version** — the preflight will catch a
-broken flag, but re-confirm the file-read-under-`--workspace` behavior by hand
-if you have time, since a preflight only proves the probe prompt worked, not
-every documented behavior.
+Catalog: `agent models` (prints "You are not authenticated" yet headless calls
+work; lists e.g. `grok-4.7`). Resolve the newest version of the seat's `line`
+from it per Latest-in-family.
 
 ### Preflight (`cli-preflight-agent`)
 
-Before the **first** `kind: cursor` seat in a run (and on reconfigure probe
-for this family), using the **same** flags as a real seat:
-
-1. Resolve `agent` on PATH (refresh PATH first, per the top of this file). Not
-   found → fail `agent-resolve`.
-2. Capture `agent --version`; record it in `meta.md` / argv-meta next to the
-   run.
-3. Write `<run>\cli-preflight.txt` containing exactly `PREFLIGHT-OK`.
-4. Dispatch: `agent -p --mode plan --trust --workspace <skillRoot> --add-dir
-   <run> --model <first configured kind:cursor slug> --output-format json
-   "Read <run>\cli-preflight.txt and reply with exactly its contents."` —
-   **`--add-dir <run>` is required, not optional.** `--workspace <skillRoot>`
-   alone only covers the shared skill root; for the Claude sibling the run
-   folder lives under `~/.claude/skills/council/runs/...`, a **separate**
-   tree from `--workspace`'s target, so `cli-preflight.txt` (and every real
-   seat's `seat-N-prompt.md`) is unreadable without it. Confirmed by direct
-   reproduction 2026-09-09: this exact preflight failed with `read_file`
-   auto-denied until `--add-dir <run>` was added, despite `--workspace
-   <skillRoot>` already being present — the same class of gap as `agy`'s
-   `--add-dir` issue, just against a different directory pair.
-5. Success: exit 0, output parses as JSON, `.is_error` is false, `.result`
-   contains `PREFLIGHT-OK`.
-6. Failure (any of: non-JSON output, non-zero exit, `.is_error` true, missing
-   `PREFLIGHT-OK`, an argument-parsing error instead of a real response): skip
-   remaining `kind: cursor` seats **only** this run (`failures.md` reason
-   `cli-preflight-agent`); do not skip `agy`/`gemini` or `codex` seats. Show
-   the user the raw preflight failure text — an argument error here means the
-   flags in this file need the same kind of fix `agy`'s got, not a silent skip
-   with no explanation.
+1. Resolve `agent` on PATH (refresh PATH first, per the top of this file) and
+   capture `agent --version`.
+2. Write `<run>\cli-preflight.txt` containing exactly `PREFLIGHT-OK`.
+3. Run the invoke recipe below with the prompt `Read <run>\cli-preflight.txt
+   and reply with exactly its contents.`
+4. Success: exit 0, JSON parses, and `.text` contains `PREFLIGHT-OK` (the text
+   may include a short preamble).
+5. Failure: skip remaining `grok` seats only (`failures.md` reason
+   `cli-preflight-agent`); show the user the raw error.
 
 ### Invoke
 
 ```powershell
-$runDir  = Join-Path $skillRoot "runs\<timestamp>"   # skill root = this SKILL.md's directory
-$promptFile = Join-Path $runDir "seat-<n>-prompt.md"
-$prompt = Get-Content -LiteralPath $promptFile -Raw
-
-$raw = agent -p --mode plan --trust --workspace $runDir --model "<slug>" --output-format json $prompt 2>&1
-$code = $LASTEXITCODE
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = (Get-Command agent).Source
+$psi.UseShellExecute = $false
+$psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+$psi.RedirectStandardInput = $true; $psi.CreateNoWindow = $true
+$psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+foreach ($t in @('-p', $shortPrompt, '--model', $slug, '--permission-mode', 'plan',
+                 '--output-format', 'json', '--cwd', $runDir, '--max-turns', '12')) {
+  $psi.ArgumentList.Add($t)
+}
+$p = [System.Diagnostics.Process]::Start($psi)
+$p.StandardInput.Close()          # required: otherwise the CLI can wait on stdin
+$out = $p.StandardOutput.ReadToEndAsync(); $err = $p.StandardError.ReadToEndAsync()
+if (-not $p.WaitForExit($timeoutMs)) { Stop-Process -Id $p.Id -Force }   # timeout
+$text = ($out.Result | ConvertFrom-Json).text
 ```
 
-- `--mode plan` = read-only/planning — the seat cannot write or edit files.
-  Never drop this for a review-only run. For an `implementation` run mode
-  (rare — only when the request itself is implementation and Revised output
-  is that implementation), see [SKILL.md](SKILL.md)'s run-mode note before
-  removing `--mode plan`; prefer keeping it and treating the seat's output as
-  a proposed diff instead.
-- `--trust` avoids an interactive workspace-trust prompt that would hang
-  headlessly.
-- `--workspace $runDir` lets the seat read `request.md`/`artifact.md`/etc. by
-  relative path without extra `--add-dir` flags.
-- Parse `$raw` as JSON. The reply text is the `.result` field. Failure
-  conditions (skip seat, log to `failures.md`, continue): `$code -ne 0`;
-  `.is_error` true; JSON parse fails; `.result` empty or missing the envelope
-  sentinels after one retry.
+- `--permission-mode plan` is read-only (a write probe created no file,
+  verified 2026-10-23). Never drop it for a review-only run.
+- `--cwd $runDir` lets the seat read the packet files; list their absolute
+  paths in the short prompt as for the other CLI seats.
+- The reply is the JSON `.text` field. It may contain a sentence or two before
+  the first Council sentinel: strip it (see Envelope parsing below). Failure
+  conditions (skip seat, log to `failures.md`, continue): non-zero exit; JSON
+  parse fails; `.text` has no Council sentinel after one retry.
 
-Model slugs come straight from `config.yaml`'s `model:` field — they're the
-same strings Cursor's Task tool and `agent --model` both accept (verified via
-`agent --list-models`). No translation needed. If a saved slug is rejected,
-skip the seat, note it, and point the user at `models.md` /
-`agent --list-models` to refresh the catalog.
-
-Default GPT reviews use **Codex CLI**, not `agent --model gpt-…`. Keep Cursor
-Task GPT only when the user explicitly chose that fallback.
-
-## `kind: cli` seat — `agy` / `gemini` (Gemini / Antigravity)
+## `gemini` seat — `agy` / `gemini` (Gemini / Antigravity)
 
 Follow the exact Antigravity recipe in Cursor's `models.md` (detect `agy`
 first, fall back to `gemini`; write the prompt to `seat-<n>-prompt.md`; invoke
@@ -154,7 +118,7 @@ agy version apparently accepted the syntax this file used to document; if a
 dispatch fails with an argument-parsing error rather than a permission one,
 that's this drift, not the permission issue above.
 
-## `kind: cli` seat — `codex` (GPT family)
+## `gpt` seat — `codex`
 
 Follow the **Codex CLI** section in shared `models.md` exactly:
 
@@ -165,7 +129,9 @@ Follow the **Codex CLI** section in shared `models.md` exactly:
    fresh `-o`, write-deny under skill root + review roots). Failure →
    `cli-preflight-codex` only.
 3. Invoke: same launcher; `exec`; `-s read-only`; `--ephemeral`;
-   `--ignore-user-config`; `--skip-git-repo-check`; `-C` skill root;
+   `--ignore-user-config`; `-c windows.sandbox="unelevated"` (required with
+   `--ignore-user-config`, else shell reads are rejected as "blocked by policy";
+   verified 2026-10-23); `--skip-git-repo-check`; `-C` skill root;
    `--add-dir` skill root + run + review roots; optional `-m` /
    `-c model_reasoning_effort=…`; `-o seat-N-last-message.txt`;
    **final positional prompt** (never `-p` — that is `--profile`).

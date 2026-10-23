@@ -16,6 +16,36 @@ Council is a **workflow**, not a harness mode. You are the orchestrator: produce
 | Orchestrator family | Seat-0 family used by Same-model skip |
 | Reconfigure | How a roster change is written |
 
+## Roster (`seats:`)
+
+Both harnesses read **one** list, `seats:` in `config.yaml`. A seat names a **model**, not a transport; the harness decides how to call it.
+
+| Key | Required | Values |
+|-----|----------|--------|
+| `family` | yes | `gemini` \| `gpt` \| `claude` \| `grok` \| `composer`. Any other value is a config error |
+| `line` | yes | Model line inside the family, e.g. `argon`, `flash`, `pro` (gemini); `sol`, `terra` (gpt); `opus`, `sonnet` (claude). The version is **not** stored; it is resolved to the newest version of that line (never a different line) |
+| `effort` | no | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Nearest offered level if the resolved version lacks it |
+| `role` | no | `reviewer` (default) \| `breadth-auditor` \| `rewriter` |
+| `label` | no | Display name |
+| `pin` | no | Exact slug. Used verbatim; disables version resolution for this seat |
+| `validation_critical` | no | Cursor churn guard only; removed with the churn guard in step 5 |
+
+**Roles (strict):** an unrecognized `role` is a config error in **both** harnesses (stop at Start, ask the user to fix `config.yaml`). A typo must never silently turn a seat into a different kind of seat.
+
+| `role` | Meaning |
+|--------|---------|
+| `reviewer` | Full critical reviewer using the inlined [reviewer-envelope.md](reviewer-envelope.md) (default when `role` is absent) |
+| `breadth-auditor` | Also reads [reviewer-prompt.md](reviewer-prompt.md): prefers `UNCHANGED`, reports breadth findings under Gaps |
+| `rewriter` | Final readability rewrite (step 7). **Accepted by validation but not implemented yet:** until step 7 a `rewriter` seat is skipped with `failures.md` reason `rewriter-not-implemented` |
+
+**Transport.** Each harness owns a mapping from `family` to how a seat is called (Cursor: every family through its Task tool; Claude Code: `gemini` through `agy`, `gpt` through the Codex CLI, `grok` through the Grok CLI, `claude` skipped by Same-model skip). A family with no transport in the current harness is **skipped, not an error**: `failures.md` reason `no-transport`, one line to the user.
+
+**Slug resolution (interim, formalized in step 6).** The harness resolves `family` + `line` + `effort` to a concrete slug against its live catalog, preferring the highest version of that line. `pin` is used as written. Never cross lines (Flash never becomes Argon) and never guess a slug; if the catalog is unreachable, skip the seat and say why.
+
+**Limits.** `max_reviewers` caps the number of seats used. The roster is the order of the list.
+
+**Migration from the old keys.** `reviewers:` (Claude sibling) and `cursor_reviewers:` (Cursor) are removed. If `config.yaml` still has either key and no `seats:`, **stop at Start** and tell the user to convert or run Reconfigure. Conversion rule: `kind`, `command` and `model` are dropped; `model` becomes `family`/`line`/`effort` (e.g. `gemini-4-argon-medium` → `family: gemini, line: argon, effort: medium`; `command: codex` + `model: gpt-5.6-sol` + `effort: medium` → `family: gpt, line: sol, effort: medium`); `role` and `label` carry over.
+
 ## Divergence ledger (temporary)
 
 Step 2 moves shared text here **without changing rules**. Where the two harnesses still differ, the difference is listed here and removed by the named step of the unification plan. Nothing below is new behavior.
@@ -25,12 +55,12 @@ Step 2 moves shared text here **without changing rules**. Where the two harnesse
 | D1 | Legacy `## Gaps` / `## Revised output` parse fallback (Parse and retry rule 2) | yes | no (treated as malformed) | step 4 (parser) |
 | D2 | Run retention | yes | no | step 8 |
 | D3 | Churn guard, Terminal calm skip, Breadth-auditor content-loss guard | yes | no | step 5 (removed) |
-| D4 | Roster key (`cursor_reviewers` vs `reviewers`), `kind`/`command` | Task only | CLI shell-outs | step 3 (`seats:`) |
+| D4 | Roster key (`cursor_reviewers` vs `reviewers`), `kind`/`command` | Task only | CLI shell-outs | **step 3: done** (`seats:`; transport mapping stays per harness) |
 | D5 | Latest-in-family upgrade, runtime model override | no | yes | step 6 (shared resolver) |
 | D6 | Exchange handling at Return | writes `exchange.md` + `last-exchange.md` | appends transcript in chat | harness-specific (stays) |
 | D7 | Cascade loop deltas (churn, family slug resolve vs preflight buckets) | in Cursor SKILL.md | in claude/SKILL.md | step 5 |
 | D8 | Seat-0 ID strip, size-check pipeline, implementation apply | defined here | inherited from here | accepted (shared) |
-| D9 | `role` validation | strict | tolerated | step 3 (strict, shared) |
+| D9 | `role` validation | strict | tolerated | **step 3: done** (strict in both) |
 
 ## When not to use
 

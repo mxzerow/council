@@ -52,16 +52,17 @@ Shared: see core.md (When not to use). Cost note: every non-skipped **Cursor `ag
 
 1. Best-effort: `mcp__ccd_session__mark_chapter` with title `Council: <topic>`.
    If unavailable, continue without it.
-2. Read `config.yaml`. Validate: `reviewers` non-empty; each entry has `kind`
-   (`cursor` or `cli`); `cursor` entries have `model`; `cli` entries have
-   `command` (`agy` | `gemini` | `codex`) or are recognizable by label;
-   `show_exchange` is `ask`/`always`/`never` (default `ask`). An
-   unrecognized `role` key is **tolerated** here (Cursor validates documented
-   roles; this sibling does not fail Start on unknown `role`). Other invalid
-   config → stop, ask the user to fix it (in the Cursor file — it's shared).
+2. Read `config.yaml`. Validate: `seats` is a non-empty list (if the old
+   `reviewers` / `cursor_reviewers` keys are present and `seats` is not, stop and
+   point to the migration rule in core.md § Roster); each seat has a known
+   `family` and a `line`; `role` is `reviewer`, `breadth-auditor` or `rewriter`
+   — an unrecognized `role` is **invalid** here too (strict, same as Cursor);
+   `show_exchange` is `ask`/`always`/`never` (default `ask`). Other invalid
+   config → stop, ask the user to fix it (in the shared file).
 3. Show the roster (count, labels, order), noting any seat that will
-   same-model-skip (see below) before asking anything. Note Gemini's
-   `role: breadth-auditor` and Codex CLI GPT seats when present.
+   same-model-skip or have no transport here (see below) before asking
+   anything. Note Gemini's `role: breadth-auditor` and the GPT (Codex CLI) seat
+   when present.
 4. Confirm, unless already decided:
    - `proceed` in the message → run
    - `configure`/`reconfigure` → go to [Reconfigure](#reconfigure)
@@ -73,32 +74,32 @@ Shared: see core.md (When not to use). Cost note: every non-skipped **Cursor `ag
 
 ### Latest-in-family upgrade (every run, before showing the roster)
 
-Roster slugs go stale as vendors ship new versions. For each non-skipped seat,
-bump to the newest version **within the same model family and tier**, never
-across them (Flash stays Flash, Pro stays Pro, Sonnet stays Sonnet, Sol stays
-Sol; a new family name such as "Argon" is **not** a newer Flash). Keep the
-seat's effort/thinking suffix (`-high`, `-medium`) when the new version offers
-it; otherwise take the nearest offered level and say so.
+A seat stores `family` + `line` + `effort`, never a version (a `pin` is the
+exception: used verbatim, never upgraded). For each non-skipped seat, resolve
+to the newest version **within the same family and line**, never across lines
+(Flash stays Flash, Pro stays Pro, Sol stays Sol; a new line name such as
+"Argon" is **not** a newer Flash). Keep the seat's `effort` when that version
+offers it; otherwise take the nearest offered level and say so.
 
-1. Look up the live catalog per command family:
-   - `agy` seats → `agy models` (tab-separated `slug<TAB>label`). Match on the
-     slug stem before the version, e.g. `gemini-3.8-flash-*` → highest
-     `gemini-<major>.<minor>-flash-<effort>`.
-   - `codex` seats → `~/.codex/models_cache.json` if present, else the model
-     list from `codex` itself. Same stem rule (`gpt-<ver>-sol`).
-   - `kind: cursor` seats → the native `agent` catalog or the Task enum, as
-     in [Family slug resolve](dispatch.md). If no catalog is reachable (the
-     `agent` on PATH may be a different tool; check `--help` first), leave the
-     seat as configured.
+1. Look up the live catalog per family:
+   - `gemini` seats → `agy models` (tab-separated `slug<TAB>label`). Match the
+     line, e.g. line `flash` → highest `gemini-<major>.<minor>-flash-<effort>`;
+     line `argon` → highest `gemini-<n>-argon-<effort>`.
+   - `gpt` seats → `~/.codex/models_cache.json` (read as UTF-8; entries with
+     `visibility` `list`) if present, else the model list from `codex` itself.
+     Same rule (`gpt-<ver>-sol`).
+   - `grok` seats → `agent models` (the Grok CLI on PATH). If no catalog is
+     reachable, skip the seat (never guess a slug).
 2. Compare version tokens numerically (`3.10` > `3.8`), not as strings. If a
-   newer same-family entry exists, use it **for this run** and tell the user
+   newer same-line entry exists, use it **for this run** and tell the user
    in one line (`gemini-3.6-flash-high → gemini-3.8-flash-high`).
-3. Catalog unreachable, or no same-family match → keep the configured slug;
-   never guess a slug and never fall back to a different family or tier.
+3. Catalog unreachable, or no same-line match → skip the seat and say why (a
+   `pin` is used as written); never guess a slug and never fall back to a
+   different family or line.
 4. Do not write `config.yaml` for this. Offer to persist only through
    [Reconfigure](#reconfigure) when the bump is stable across runs.
-5. A runtime override that **names an exact slug** is honored as written; only
-   unpinned roster seats are upgraded.
+5. A runtime override that **names an exact slug** is treated as a `pin` and
+   honored as written; only unpinned seats are resolved.
 
 ### Artifact selection
 
@@ -116,10 +117,11 @@ The user may suggest a different roster for this run only, as part of the
 
 Resolution:
 
-1. Resolve each named model against `models.md`'s catalog (label or slug,
-   case-insensitive). Not found there → check `agent --list-models` (live
-   catalog). Still not found → tell the user it isn't resolvable; leave that
-   seat out of this run rather than guessing a slug.
+1. Resolve each named model as a seat (`family` + `line`, e.g. `gemini argon`,
+   `gpt sol`) against the live catalog per Latest-in-family, or as an exact
+   slug (then treated as a `pin`; check `models.md`'s catalog or `agy models`).
+   Not found → tell the user it isn't resolvable; leave that seat out of this
+   run rather than guessing a slug.
 2. An override **replaces** the roster for this run, in the order given —
    unless the request is clearly additive ("also run Gemini", "add a
    Composer pass"), in which case append to the default roster instead.
@@ -141,38 +143,26 @@ Shared: see core.md (Run folder). Claude Code specifics: resolve `runs_dir`: `co
 ## Same-model skip
 
 The orchestrator is always Claude (`family: claude`) — there is no per-session
-model picker here, unlike Cursor. Before each reviewer, resolve its family from
-`models.md`'s family table (grok/gpt/claude/gemini/composer; `command: codex`
-→ `gpt`; unfamiliar slug → its own unique family, no skip). **Any `claude` or
-`claude-fable` family reviewer is skipped automatically** — append to
-`failures.md`, one line to the user, continue.
+model picker here, unlike Cursor. Before each reviewer, use the seat's
+`family` (gemini / gpt / claude / grok / composer). **Any `claude`-family seat
+is skipped automatically** — append to `failures.md`, one line to the user,
+continue.
 
-Shared `config.yaml` default order (interleaved since 2026-09-12 — Gemini/agy
-is cheap enough to run every other seat) is **Gemini → Claude → Gemini →
-Codex CLI (GPT) → Gemini → Grok → Gemini**, with only the first Gemini seat as
-`role: breadth-auditor` (copy-through; Gaps for later seats) — the three
-interleaved Gemini passes are ordinary critical reviewers. With the automatic
-Claude-family skip removing exactly the one Claude seat, this sibling
-effectively runs **Gemini → Gemini → Codex → Gemini → Grok → Gemini** (six of
-the seven seats). (Do not claim stale paths that put Gemini last, use Cursor
-Task GPT, claim only one Gemini seat exists, or “Grok → GPT → Claude,
-effectively Grok → GPT.”)
+**Transport mapping (Claude Code):** `gemini` → `agy`; `gpt` → `codex`;
+`grok` → the Grok CLI (`agent`); `claude` → skipped; `composer` → no
+transport here (skipped, reason `no-transport`). The default roster
+(Gemini Argon → Claude Opus → GPT Sol → Gemini Argon) therefore runs as
+**Argon → Sol → Argon** (three of the four seats); a Grok seat, if added, runs.
 
-Note: the Cursor sibling's `config.yaml` also redefined `churn_guard`'s
-counting dimension this same day (family-based — Gemini excluded, Codex now
-counts — see the root `SKILL.md` § Churn guard). That change is Cursor-only
-and doesn't apply here — this sibling has no churn-stop concept at all, per
-the paragraph below.
-
-This sibling has **no** Cursor churn-stop, **no** `terminal_calm_skip`, and **no** content-loss guard: every non-skipped seat runs, and a breadth seat's Revised is accepted on ordinary parse rules. Do not claim Cursor's Grok-skip effective paths. `UNCHANGED`, `verdicts.md`, gap tiers, open-gap packets, and placeholder omission **do** apply here (same envelope grammar as Cursor).
+This sibling has **no** Cursor churn-stop, **no** `terminal_calm_skip`, and **no** content-loss guard: every non-skipped seat runs, and a breadth seat's Revised is accepted on ordinary parse rules. `UNCHANGED`, `verdicts.md`, gap tiers, open-gap packets, and placeholder omission **do** apply here (same envelope grammar as Cursor).
 
 `role` from shared config: pass it through in `seat-<n>-prompt.md` metadata and
-rely on the inlined `reviewer-prompt.md` breadth subsection. An unrecognized
-`role` value is **tolerated** here (not a Start validation failure). This
-sibling does not implement the Cursor content-loss guard; it **does** print
+rely on the inlined `reviewer-prompt.md` breadth subsection. This sibling does
+not implement the Cursor content-loss guard; it **does** print
 **Breadth audit findings** at Return for breadth Gaps that later seats never
 marked `addressed` (or from a failed breadth Revised). When Gemini is first,
 copy-through Gaps are normal cascade input — not an automatic Return dump.
+A `rewriter` seat is skipped (`rewriter-not-implemented`) until step 7.
 
 This check runs against the **final roster for the run**, default or
 overridden — a [runtime override](#runtime-model-override-optional) naming a
@@ -191,33 +181,29 @@ Cache the compact envelope text **once per run** and inline it into ordinary
 `unresolved.md`. After gaps exist, point seats at `open-gaps.md` (not `gaps.md`).
 Supply **open blocking IDs** as a comma-separated header (mandatory STATUS set).
 
-Maintain **per-command-family** preflight state: native `agent` (`kind: cursor`)
-vs `agy`/`gemini` vs `codex` fail **independently** — a broken `agent` probe
-must not skip `agy`/`codex` seats, and vice versa (confirmed by direct
-reproduction 2026-09-09: the `agy` and `codex` recipes already isolated
-correctly; `agent` had no preflight bucket at all until this fix, so nothing
-was catching a broken `agent` flag the way `agy`'s break was caught).
+Maintain **per-transport** preflight state: Grok CLI (`agent`) vs
+`agy`/`gemini` vs `codex` fail **independently** — a broken `agent` probe
+must not skip `agy`/`codex` seats, and vice versa.
 
 For each non-skipped reviewer in roster order:
 
 1. Refresh `artifact.md`, `gaps.md`, `open-gaps.md`, `verdicts.md`, `unresolved.md` on disk.
 2. Write `seat-<n>-prompt.md`: seat index, label, total seats, run mode,
-   **kind**, **family**, **role** (from config when present), **open blocking IDs**,
+   **family**, **role** (from config when present), **open blocking IDs**,
    absolute packet paths (**never** `meta.md`; omit placeholder files), and the
    compact envelope **inlined** from `reviewer-envelope.md`. Breadth-auditor and
    implementation seats also get a path to `reviewer-prompt.md`. Implementation
    headers list allowed proposal/application roots.
-3. Dispatch per [dispatch.md](dispatch.md):
-   - `kind: cursor` → native `agent` CLI with `--model <slug>`
-   - `kind: cli` + `agy`/`gemini` → Antigravity recipe in shared `models.md`
-   - `kind: cli` + `codex` → Codex recipe in shared `models.md` (resolved
-     launcher once; positional prompt; `-o`; tree-kill timeout)
-4. Before the first seat of **each** family in this run — `kind: cursor`
-   (`agent`) included, not just the two `kind: cli` families — run that
-   family's preflight (`agent`'s is in [dispatch.md](dispatch.md); `agy`/
-   `codex`'s are in `models.md`). On failure, skip remaining seats of
-   **that** family only (`cli-preflight-agent`, `cli-preflight-agy`, or
-   `cli-preflight-codex`) — a failed probe in one family must never skip
+3. Dispatch per [dispatch.md](dispatch.md), by the seat's family:
+   - `grok` → Grok CLI recipe in [dispatch.md](dispatch.md)
+   - `gemini` → Antigravity recipe in shared `models.md`
+   - `gpt` → Codex recipe in shared `models.md` (resolved launcher once;
+     positional prompt; `-o`; tree-kill timeout)
+4. Before the first seat of **each** transport in this run, run that
+   transport's preflight (Grok CLI's is in [dispatch.md](dispatch.md);
+   `agy`/`codex`'s are in `models.md`). On failure, skip remaining seats of
+   **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, or
+   `cli-preflight-codex`) — a failed probe in one transport must never skip
    either of the other two.
 5. Parse the reply per [dispatch.md](dispatch.md) envelope rules (recognize
    `<<<COUNCIL_STATUS>>>` — do not drop text before Gaps when STATUS is present).
@@ -259,18 +245,18 @@ Do not create a local roster or copy shared role rules into this folder.
 ## Reconfigure
 
 `config.yaml` is shared with Cursor — edits here change both orchestrators'
-rosters. When persisting, preserve `role: breadth-auditor` on Gemini unless the
-user explicitly removes it.
+rosters (the single `seats:` list). When persisting, preserve
+`role: breadth-auditor` on Gemini unless the user explicitly removes it.
 
-1. Read `models.md` for the catalog (native `agent --list-models` is the live
-   source of truth if `models.md` looks stale — flag the mismatch, don't
-   silently trust either).
-2. Ask reviewer count (minimum 1), then which catalog entry per seat, in order.
-   ChatGPT/GPT defaults to **Codex CLI**; Cursor Task GPT is an explicit fallback.
-3. If a `cli` seat is chosen, probe **that command family** per `models.md`
-   before accepting (`agy`/`gemini` vs `codex` independently). On failure, ask
+1. Read `models.md` for the catalog; the live catalogs (`agy models`,
+   `~/.codex/models_cache.json`, `agent models`) are the source of truth if
+   `models.md` looks stale — flag the mismatch, don't silently trust either.
+2. Ask seat count (minimum 1), then for each seat in order: `family`, `line`,
+   `effort`, optional `role`. GPT is dispatched through the **Codex CLI** here.
+3. Probe **that seat's transport** per `models.md` / `dispatch.md` before
+   accepting (`agy` vs `codex` vs Grok CLI independently). On failure, ask
    whether to keep it anyway or pick something else. Default
-   `role: breadth-auditor` for Gemini/Antigravity seats.
+   `role: breadth-auditor` for the first Gemini seat.
 4. Ask whether to persist (writes the shared `config.yaml`) and the
    `show_exchange` default.
 5. If persisted, add an entry to `CHANGELOG.md` (dated, `Changed`/`Added`/

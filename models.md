@@ -280,7 +280,7 @@ Before the **first** `codex` seat (and on reconfigure probe for Codex), with the
 
 Never pass `-p` for the prompt (`-p` / `--profile` selects a Codex profile). Prompt is the **final positional** argument only (or stdin `-` if you deliberately use stdin).
 
-Always include: `-s read-only`, `--ephemeral`, `--ignore-user-config`, `--skip-git-repo-check`.
+Always include: `-s read-only`, `--ephemeral`, `--ignore-user-config`, `-c windows.sandbox="unelevated"` (without it, `--ignore-user-config` drops the Windows sandbox setting and every shell read is rejected as "blocked by policy"; verified 2026-10-23), `--skip-git-repo-check`.
 Never: `--dangerously-bypass-approvals-and-sandbox`.
 
 ```powershell
@@ -307,6 +307,7 @@ $argTokens.Add('exec')
 $argTokens.Add('-s'); $argTokens.Add('read-only')
 $argTokens.Add('--ephemeral')
 $argTokens.Add('--ignore-user-config')
+$argTokens.Add('-c'); $argTokens.Add('windows.sandbox="unelevated"')
 $argTokens.Add('--skip-git-repo-check')
 $argTokens.Add('-C'); $argTokens.Add($skillRoot)
 foreach ($d in $addDirs) { $argTokens.Add('--add-dir'); $argTokens.Add($d) }

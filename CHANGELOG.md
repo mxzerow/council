@@ -13,7 +13,7 @@ PR (not backfilled later). One entry per PR, dated by merge date, using
 `Added` / `Changed` / `Fixed` / `Removed` sections as needed. Skip trivial
 wording fixes that don't change behavior.
 
-## 2026-10-23 — Unify the Cursor and Claude Code skills; gaps-only reviewers, Opus integration, Flash rewrite
+## 2026-10-23 — Unify the Cursor and Claude Code skills; gaps-only reviewers, Opus integration, rewriter chain
 
 ### Changed
 
@@ -28,6 +28,7 @@ wording fixes that don't change behavior.
 
 ### Added
 
+- **Rewriter fallback chain.** Several `rewriter` seats are tried in order (Gemini Argon, Gemini Flash, Claude Sonnet, all newest of their line); the first that resolves and works does the whole rewrite. Needed because the Cursor Task list has no Gemini Flash. Rewrite chunks are sent inline in the prompt at low effort: measured on `agy`, a file read doubles input tokens (34k against 17.7k) and one medium-effort call spent 13.9k thinking tokens. `agy` calls use `--output-format json`, which also reports token usage.
 - `scripts/council_parse.py`: parses replies, mints gap IDs, applies STATUS, restores dropped dissent, and renders the packet files from `gaps.json`. The orchestrator reads a one-line summary instead of the full reply.
 - `scripts/council_resolve.py`: newest-version-of-the-same-line resolver, rejected-model cooldown, last-good fallback, failure classifier.
 - `scripts/council_rewrite.py`: masks protected text, rewrites in small chunks, checks every chunk, falls back per chunk or for the whole artifact, and reports every explanation added.

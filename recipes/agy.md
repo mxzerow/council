@@ -22,6 +22,25 @@ $r = Invoke-Seat $agy $tokens ($timeoutSec * 1000) $outFile $errFile
 
 Reply = stdout. Failure classes: see common.md. Preflight: common.md, with `--model` set to the first configured `gemini` slug.
 
-## Rewriter chunk calls
+## Cost: what a call really costs (measured 2026-10-23)
 
-Same invoke, with `-p "Read <run>\rewrite\chunk-<i>-prompt.md and do exactly what it says. Output only the rewritten chunk followed by the final REWRITE_END line. Do not write any files."` and `--add-dir <run>`. Save stdout to a file and pass it to `council_rewrite.py check`. Verified live 2026-10-23 with `gemini-3.8-flash-medium`: an occasional empty reply happens (two in a row once, then fine); treat empty output as a seat failure, classify stderr, and retry once.
+`agy -p ... --output-format json` prints `{"response": "...", "usage": {"input_tokens", "output_tokens", "thinking_tokens", ...}, "num_turns", "duration_seconds"}`. Use it for every call: take the reply from `.response` (the parsers unwrap it) and log `.usage` in `seat-<n>-argv-meta.txt`.
+
+- **Fixed overhead:** a trivial "reply OK" costs about **15.4k input tokens**. That is the agent's own system prompt and tool set, paid on every model call.
+- **A file read is a second call.** Asking `agy` to read a file (`Read <path> ...`) costs a tool round trip inside the same turn, so input tokens double (34k against 17.7k for the same 9 KB chunk) even though `num_turns` still says 1.
+- **Thinking can spike.** The identical medium-effort file-read call once spent **13.9k thinking tokens and 100 s**; the same task inline, or at low effort, spent 0 and took about 19 s. Only one sample each, but the spike is real and avoidable.
+
+## Rewriter chunk calls (inline, low effort)
+
+Put the chunk **in the prompt**; do not ask the model to read it:
+
+```powershell
+$text  = [IO.File]::ReadAllText("$run\rewrite\chunk-$i-prompt.md")
+$tail  = "`n`nDo not use any tools or read any files. Output only the rewritten chunk followed by the final REWRITE_END line."
+$tokens = @('--model', $slug, '--output-format', 'json', '-p', ($text + $tail))     # no --add-dir needed: nothing is read
+$r = Invoke-Seat $agy $tokens ($timeoutSec * 1000) $outFile $errFile                # $outFile is JSON; pass it to council_rewrite.py check
+```
+
+- Use the rewriter seat's effort (`-low` model variant). Rewriting is mechanical; on the same real chunk, low and medium both passed the validator, and low added fewer explanations (25 against 34).
+- The whole prompt is on the command line (Windows limit about 32k characters). `council_rewrite.py prepare` prints `inline_ok`; if it is `false`, use `--max-chars` smaller or fall back to the file-read form for that run (`--add-dir <run>` and `-p "Read <chunk prompt> and do exactly what it says. ..."`).
+- An occasional empty reply happens (seen: two in a row once, then fine). Treat empty output as a seat failure: classify stderr, retry once, then move down the rewriter chain.

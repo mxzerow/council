@@ -83,6 +83,12 @@ class Mint(Base):
         self.assertEqual(code, 0)
         self.assertEqual(s["gaps"]["ids"], ["G1-1"])
 
+    def test_json_wrapper_response_field_from_agy(self):
+        wrapped = json.dumps({"conversation_id": "x", "status": "SUCCESS", "response": env(gaps="- blocking: x"),
+                              "usage": {"input_tokens": 15434, "output_tokens": 200}})
+        code, s = self.parse(1, wrapped)
+        self.assertEqual((code, s["gaps"]["blocking"]), (0, 1))
+
     def test_json_wrapper_text_field(self):
         code, s = self.parse(1, json.dumps({"text": env(gaps="- blocking: x"), "stopReason": "end_turn"}))
         self.assertEqual(code, 0)

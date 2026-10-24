@@ -52,7 +52,7 @@ Cost: Codex CLI seats use ChatGPT/Codex quota when `codex login status` reports 
 
 ### Model resolution (Claude Code)
 
-Before showing the roster, resolve every non-skipped seat per core.md § Model resolution. Sources: `gemini` → `--source agy`, `gpt` → `--source codex`, `grok` → `--source grok`; state file `<runs_dir>\_resolved.json`. Skip a `claude` or `composer` seat before resolving it.
+Before showing the roster, resolve every non-skipped **gemini, gpt and grok** seat per core.md § Model resolution. Sources: `gemini` → `--source agy`, `gpt` → `--source codex`, `grok` → `--source grok`; state file `<runs_dir>\_resolved.json`. A `claude` or `composer` **reviewer** is skipped before resolving. A `claude` **rewriter** (Sonnet) is dispatched as a subagent and needs no resolving: the Agent tool's `model: sonnet` is the latest Sonnet.
 
 ### Runtime override
 
@@ -76,10 +76,10 @@ The orchestrator is always Claude (`family: claude`). **Any `claude`-family seat
 | `gemini` | `agy` |
 | `gpt` | `codex` |
 | `grok` | Grok CLI (`agent`) |
-| `claude` | skipped (same family) |
+| `claude` | reviewers: skipped (same family). Rewriter: Agent-tool subagent, `model: sonnet` |
 | `composer` | none → skipped, `no-transport` |
 
-The default roster (Gemini Argon → GPT Sol → Gemini Flash rewriter) runs as **Argon → Sol**, then the Opus integration stage, then the **Flash rewrite**. The rewriter is not a reviewer and is exempt from the skip.
+The default reviewers (Gemini Argon → GPT Sol) run as **Argon → Sol**, then the Opus integration stage, then the **rewriter chain** (Argon, then Flash, then Sonnet; the first that works does the rewrite). A rewriter is not a reviewer and is exempt from the skip.
 
 ## Dispatch (Claude Code)
 
@@ -92,7 +92,11 @@ For each seat core.md says to dispatch:
 
 ### Rewrite stage
 
-After integration, run core.md § Stages step 4 with the `rewriter` seat: each chunk is one `agy` call (`recipes/agy.md`) whose prompt is `rewrite/chunk-<i>-prompt.md` and whose stdout is saved to a file for `council_rewrite.py check`. Resolve the seat's model like any other (`--source agy`, line `flash`). A `no-line-match` or `no-catalog` skips the rewrite with the reason.
+After integration, run core.md § Stages step 4 with the rewriter chain, in order, until one works:
+
+- **`gemini` rewriter (Argon, Flash):** one `agy` call per chunk with the chunk **inside the prompt** and `--output-format json` ([`recipes/agy.md`](../recipes/agy.md) § Rewriter chunk calls). Resolve the model with `--source agy`; a `no-line-match` or `no-catalog` moves to the next seat.
+- **`claude` rewriter (Sonnet):** dispatch the `general-purpose` agent with `model: sonnet` and a file-based brief: read `rewrite/chunk-<i>-prompt.md`, write the rewritten chunk plus the final `REWRITE_END` line to `rewrite/chunk-<i>-reply.txt`, reply `DONE`. This uses no CLI quota, so it still works when `agy` is out. Save nothing yourself unless the file is missing.
+- Then `council_rewrite.py check` the reply file. Move down the chain only for the seat-level failures listed in core.md.
 
 ### Integration stage
 

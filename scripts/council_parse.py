@@ -162,7 +162,7 @@ def unwrap(raw):
     if s.startswith("{"):
         try:
             j = json.loads(s)
-            for k in ("text", "result"):
+            for k in ("response", "text", "result"):    # agy, Grok CLI, others
                 if isinstance(j, dict) and isinstance(j.get(k), str):
                     return j[k]
         except ValueError:

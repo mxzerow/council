@@ -43,7 +43,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 **Roster:** `seats:` (schema, strict `role` values, migration from the old keys: [core.md](core.md#roster-seats)). **Transport:** every seat is dispatched through Task, whatever its family. Never shell out to `agy`, `gemini`, `codex`, `grok` or `agent` from Cursor.
 
-**Default roster:** Gemini Argon (`breadth-auditor`) → GPT Sol → Gemini Flash (`rewriter`). Seat 0 and the integration stage are Opus (the chat model, or an Opus Task seat); they are stages, not roster entries.
+**Default roster:** reviewers Gemini Argon (`breadth-auditor`) → GPT Sol, then the rewriter chain Gemini Argon → Gemini Flash → Claude Sonnet (the first one the Task list offers does the rewrite; today that is Argon). Seat 0 and the integration stage are Opus (the chat model, or an Opus Task seat); they are stages, not roster entries.
 
 ## Start
 
@@ -65,9 +65,9 @@ Rule and family table: [core.md](core.md#same-model-skip). Seat 0 is the selecte
 
 | Seat-0 family | Effective path (default roster) |
 |---|---|
-| Claude, Grok, Composer, or `unknown` (author not known) | Argon → Sol, then integrate, then Flash rewrite (nothing skipped) |
-| GPT | Argon, then integrate, then Flash rewrite (Sol skipped) |
-| Gemini | Sol, then integrate (Argon skipped; the rewrite still runs) |
+| Claude, Grok, Composer, or `unknown` (author not known) | Argon → Sol, then integrate, then rewrite (nothing skipped) |
+| GPT | Argon, then integrate, then rewrite (Sol skipped) |
+| Gemini | Sol, then integrate (Argon skipped as a reviewer; the rewrite still runs) |
 
 The integration and rewrite stages are **not** reviews, so they are never skipped by this rule (see [core.md](core.md#stages)).
 
@@ -85,7 +85,7 @@ This is the only logic that differs from Claude Code. For each seat core.md says
 
 **Task seats and stalls:** the orchestrator cannot poll inside a blocking `Task`. Do **not** peek at `subagents\*.jsonl` mid-flight and call that a stall. If a Task hangs, the user interrupt is the escape. State this if a seat is taking unusually long.
 
-**Rewrite stage:** needs a Gemini Flash in the Task model list. As of 2026-10-23 the Task list has none ([catalog.md](catalog.md)), so the resolver returns `no-line-match`: skip the rewrite, say why in the Return line, and return the integrated artifact. If a Flash is offered, dispatch each chunk as a Task seat the same way, but ask it to write its output (the rewritten chunk followed by the final `REWRITE_END` line) to `<run>\rewrite\chunk-<i>-reply.txt` and acknowledge; if the file is missing, save the returned text there; then run `council_rewrite.py check --reply` on that file.
+**Rewrite stage:** the `rewriter` seats are an ordered fallback chain (core.md, Stages step 4): resolve them in order and use the first the Task list offers. As of 2026-10-23 the Task list has no Gemini Flash ([catalog.md](catalog.md)), but it has Gemini 4 Argon, which is first in the chain, so the rewrite runs on Argon. Dispatch each chunk as a Task seat on that model: it writes its output (the rewritten chunk followed by the final `REWRITE_END` line) to `<run>\rewrite\chunk-<i>-reply.txt` and acknowledges; if the file is missing, save the returned text there; then `council_rewrite.py check --reply` that file. If nothing in the chain resolves, skip the rewrite, say why in the Return line, and return the integrated artifact.
 
 **Integration stage:** dispatch as a Task seat with family `claude`, line `opus` (resolved like any seat), or run it yourself when the chat model is already Opus (then write your own envelope to `<run>\seat-<n>-reply.txt` and parse it like any seat with `--role integrator`, using the next seat number after the last reviewer). If the chat model is not Opus and no Opus Task model is available, warn the user that the draft and integration are not Opus-grade.
 

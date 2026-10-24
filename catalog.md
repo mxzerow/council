@@ -15,6 +15,6 @@ What a Cursor session's **Task tool** offered on 2026-10-23, as reported by the 
 | `grok-4.7-medium` | `grok` | grok | Newer Grok; the resolver prefers it |
 | `muse-wonder-1.0-high` | none | | Not a Council family; ignored |
 
-**No Gemini Flash is offered**, so the default `rewriter` seat resolves to `no-line-match` and the rewrite stage is skipped in Cursor (the integrated artifact is returned). To get the rewrite, run `/council` in Claude Code, or change the `rewriter` seat to a line the Task list offers.
+**No Gemini Flash is offered**, so the second rewriter in the chain resolves to `no-line-match`; the first (Gemini 4 Argon) is offered, so the rewrite stage runs on Argon in Cursor. Claude Sonnet (the third) is offered as `claude-sonnet-5-5-high`.
 
 The initial draft is always the current chat model (or an Opus Task seat); it is not a catalog seat.

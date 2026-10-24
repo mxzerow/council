@@ -39,6 +39,7 @@ import time
 DEFAULT_MAX_CHARS = 24000
 LEN_MIN, LEN_MAX = 0.70, 2.20
 MAX_ADDITION_CHARS = 140       # one explanation, not a paragraph
+MAX_INLINE_PROMPT_CHARS = 26000  # leaves room under the ~32k Windows command-line limit for the exe path, flags and the inline tail
 FALLBACK_ALL_RATIO = 0.5       # more than this share of chunks original -> restore the pre-rewrite artifact
 WARN_RATIO = 0.3
 ADD_OPEN, ADD_CLOSE = "{{+", "+}}"
@@ -68,6 +69,20 @@ def read(path):
             return normalize(f.read())
     except OSError as e:
         raise UsageError(str(e))
+
+
+def unwrap(raw):
+    """Accept plain text or the JSON a CLI printed (`response` = agy, `text` = Grok, `result` = others)."""
+    s = raw.lstrip()
+    if s.startswith("{"):
+        try:
+            j = json.loads(s)
+            for k in ("response", "text", "result"):
+                if isinstance(j, dict) and isinstance(j.get(k), str):
+                    return normalize(j[k].encode("utf-8"))
+        except ValueError:
+            pass
+    return raw
 
 
 def write(path, text, eol="lf"):
@@ -422,16 +437,20 @@ def cmd_prepare(a):
     os.makedirs(rw_dir(run), exist_ok=True)
     meta = []
     header = HEADER.replace("@@P12@@", f"{prefix}12@@")
+    longest = 0
     for i, c in enumerate(chunks, 1):
         write(os.path.join(rw_dir(run), f"chunk-{i}-in.txt"), c)
         # NOT str.format(): the header contains literal {{+ and +}} markers that format() would collapse
-        write(os.path.join(rw_dir(run), f"chunk-{i}-prompt.md"),
-              header.replace("{n}", str(i)) + f"\nChunk {i} of {len(chunks)}. The text to rewrite is below.\n\n-----\n{c}\n-----\n")
+        prompt = header.replace("{n}", str(i)) + f"\nChunk {i} of {len(chunks)}. The text to rewrite is below.\n\n-----\n{c}\n-----\n"
+        write(os.path.join(rw_dir(run), f"chunk-{i}-prompt.md"), prompt)
+        longest = max(longest, len(prompt))
         meta.append({"i": i, "chars": len(c), "attempts": 0, "status": "pending", "reasons": []})
     save_plan(run, {"version": 2, "table": {str(k): v for k, v in table.items()}, "prefix": prefix, "eol": eol,
                     "chunks": meta, "max_chars": a.max_chars})
     print(json.dumps({"status": "prepared", "chunks": len(chunks), "protected_spans": len(table),
                       "chars": len(original), "prefix": prefix,
+                      # inline mode puts the whole prompt on the command line (Windows limit ~32k chars)
+                      "longest_prompt_chars": longest, "inline_ok": longest <= MAX_INLINE_PROMPT_CHARS,
                       "prompt_files": [f"rewrite/chunk-{i}-prompt.md" for i in range(1, len(chunks) + 1)]}))
     return 0
 
@@ -445,7 +464,7 @@ def cmd_check(a):
     if meta["status"] in ("accepted", "fallback"):
         raise UsageError(f"chunk {i} is already {meta['status']}")
     src = read(os.path.join(rw_dir(a.run), f"chunk-{i}-in.txt"))
-    out = read(a.reply)
+    out = unwrap(read(a.reply))
     meta["attempts"] += 1
     reasons = check_chunk(src, out, i, plan["prefix"])
     if not reasons:

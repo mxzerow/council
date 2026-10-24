@@ -167,6 +167,26 @@ class Files(unittest.TestCase):
             self.put("reply.txt", (src + f"\n<<<REWRITE_END {i}>>>\n").encode("utf-8"))
             self.cli("check", "--run", self.run, "--chunk", str(i), "--reply", os.path.join(self.run, "reply.txt"))
 
+    def test_agy_json_reply_is_unwrapped_by_check(self):
+        self.put("artifact.md", b"# T\n\nHello world.\n")
+        code, s = self.cli("prepare", "--run", self.run)
+        with open(os.path.join(self.run, "rewrite", "chunk-1-in.txt"), encoding="utf-8") as f:
+            src = f.read()
+        wrapped = json.dumps({"conversation_id": "x", "status": "SUCCESS", "response": src + "\n<<<REWRITE_END 1>>>\n",
+                              "usage": {"input_tokens": 17672, "output_tokens": 10}})
+        self.put("reply.txt", wrapped.encode("utf-8"))
+        code, s = self.cli("check", "--run", self.run, "--chunk", "1", "--reply", os.path.join(self.run, "reply.txt"))
+        self.assertEqual((code, s["status"]), (0, "ok"))
+
+    def test_prepare_reports_whether_every_prompt_fits_the_command_line(self):
+        self.put("artifact.md", b"# T\n\nHello world.\n")
+        code, s = self.cli("prepare", "--run", self.run)
+        self.assertTrue(s["inline_ok"])
+        self.assertLess(s["longest_prompt_chars"], rw.MAX_INLINE_PROMPT_CHARS)
+        self.put("artifact.md", ("# T\n\n" + ("word " * 5000 + "\n\n") * 4).encode("utf-8"))
+        code, s = self.cli("prepare", "--run", self.run, "--max-chars", "24000")
+        self.assertEqual(s["inline_ok"], s["longest_prompt_chars"] <= rw.MAX_INLINE_PROMPT_CHARS)
+
     def test_crlf_identity_is_byte_identical(self):
         original = b"# T\r\n\r\nHello world.\r\n\r\nKeep this text.\r\n"
         self.put("artifact.md", original)

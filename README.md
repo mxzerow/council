@@ -36,7 +36,7 @@ Recipes for calling each CLI are written for PowerShell on Windows ([`recipes/`]
 | `api`, paid | Own key with billing enabled; enabled + `tier: paid` | Expected faster; not measured here | Per-token API billing | Prompts/replies not used for product improvement under paid API terms | API project/model limits |
 | `cursor` | Cursor Task, or signed-in `cursor-agent` in Claude Code | Model/account dependent | Cursor usage | Cursor account terms | Cursor usage limits |
 
-**Do not send PHI or confidential text through the free tier.** Set `tier` to match the API project's billing; the setting does not provision billing or verify it. These measurements and privacy descriptions come from the implementation handoff; this change has been tested offline. See [the API recipe](recipes/api.md) for observed model errors, call details and the fallback table.
+**Do not send PHI or confidential text through the free tier.** Set `tier` to match the API project's billing; the setting does not provision billing or verify it. The latency figures are observations from a free-tier key on 2026-10-24, not guarantees: `gemini-3.8-flash` took about 120 s for a short review prompt (about 150–170 s to first token on a trivial one), `gemini-3.5-flash` about 1 s, `gemini-3.6-flash` returned 503, and Argon returned 429 on the free tier. The newest model is the slowest because free-tier traffic queues behind paid traffic. Paid-tier speed has not been measured. The privacy descriptions are Google's published terms as understood on that date; check them for your account. See [the API recipe](recipes/api.md) for observed model errors, call details and the fallback table.
 
 Key-file setup (PowerShell 7, in your own terminal; never paste a key into chat):
 
@@ -154,6 +154,8 @@ seats:
 
 A seat names a model family and line, never a version: the newest version of that line is picked from the live catalog on every run, and a different line is never substituted (Flash never becomes Argon). Add `pin: <exact slug>` to freeze a seat. An unrecognized `role` is a config error. A family with no way to be called in the current harness is skipped. Claude Code skips `claude` seats (same family as the orchestrator).
 
+Other keys in `config.yaml`: `show_exchange` (`ask|always|never`), `max_reviewers`, `cli_timeout_sec`, run retention (`run_retention_count`, `run_retention_days`), `stall_checkin_sec`, `gemini_transport` (ordered Gemini routes, default `[agy, cursor]`) and the `gemini_api` block (`enabled`, `tier`, `free_tier_ack`, `thinking_level`, `max_output_review`, `max_output_rewrite`, `max_model_steps`, `timeout_sec`; see [Choosing how Gemini is called](#choosing-how-gemini-is-called)).
+
 Machine-specific overrides go in `config.local.yaml` (gitignored; see [`config.local.example.yaml`](config.local.example.yaml)), for example `runs_dir`. Run folders default to `~/.council/runs` (outside the skill folder).
 
 ## Layout
@@ -182,6 +184,8 @@ The scripts are what keeps the model-written parts honest: replies are parsed an
 ## Status
 
 Verified live in Claude Code on 2026-10-23 (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite). Cursor's own agent read the skill and reported READY WITH FIXES (fixed since): the Task tool offers Gemini 4 Argon, Claude Opus 5.5 and GPT-5.6 Sol but **no Gemini Flash**, so in Cursor the rewrite runs on Gemini 4 Argon, first in the rewriter chain. Task seats writing their reply to a file, and shell access for the scripts outside plan mode, have not been exercised yet; the first real Cursor run is the check.
+
+The opt-in Gemini API lane was verified live on 2026-10-24 with a free-tier key (`gemini-3.8-flash`, one real call, about 120 s) and reviewed against a fake server for key leaks (no leaks in 20 attack cases). It has not yet been run as part of a full council run, on the paid tier, or from a Cursor cloud agent.
 
 ## Run data
 

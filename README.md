@@ -20,6 +20,7 @@ There is no parallel first-answers pass and no chairman synthesis. See [`core.md
 | `gemini` seats | [Antigravity CLI](https://antigravity.google/cli) (`agy`), signed in with Google. No API key |
 | `gpt` seats | [Codex CLI](https://github.com/openai/codex) (`codex login`). ChatGPT login uses ChatGPT/Codex quota |
 | `grok` seats | The Grok CLI (`agent` on PATH) |
+| Fallback for `gemini` seats | Cursor's CLI (`cursor-agent login`): used when `agy` is out of quota; spends Cursor usage |
 | Cursor | Every seat goes through Cursor's own Task tool, so the CLIs above are not needed there |
 
 Recipes for calling each CLI are written for PowerShell on Windows ([`recipes/`](recipes/)).

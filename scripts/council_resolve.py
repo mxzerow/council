@@ -20,6 +20,7 @@ Sources (--source)
   agy          run `agy models`
   codex        read ~/.codex/models_cache.json (UTF-8), entries with visibility "list"
   grok         run `agent models`
+  cursor       run `cursor-agent --list-models` (a fallback lane for any family Cursor serves)
   file:PATH    slugs one per line (optionally `slug<TAB>label`), e.g. a Cursor Task enum
 
 Exit codes: 0 ok / skip (read the JSON `status`), 2 usage or IO error.
@@ -106,6 +107,10 @@ def catalog(source):
         elif source == "grok":
             out = run_cli(["agent"], ["models"]).replace("\r\n", "\n")
             slugs = [m.group(1) for m in re.finditer(r"^\s*\*?\s*(grok-[\w.\-]+)", out, re.M)]
+        elif source == "cursor":
+            # Cursor's CLI can serve Gemini, GPT, Claude and Grok models from Cursor's own quota
+            out = run_cli(["cursor-agent"], ["--list-models"]).replace("\r\n", "\n")
+            slugs = [m.group(1) for m in re.finditer(r"^[ \t]*([a-z0-9][a-z0-9.\-]*) - ", out, re.M)]
         elif source == "codex":
             p = os.path.join(os.path.expanduser("~"), ".codex", "models_cache.json")
             with open(p, "rb") as f:

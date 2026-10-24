@@ -215,6 +215,21 @@ class CursorListing(Env):
             self.assertEqual(r["slug"], want, (fam, line))
 
 
+class CursorSource(Env):
+    def test_cursor_source_parses_the_cli_listing(self):
+        listing = ("Available models\r\n\r\ngemini-4-argon-medium - Gemini 4 Argon Medium\r\n"
+                   "gemini-3.8-flash-low - Gemini 3.8 Flash Low\r\ngemini-3.8-flash-medium - Gemini 3.8 Flash Medium\r\n"
+                   "claude-sonnet-5-5-high - Claude Sonnet 5.5 1M High\r\n\r\nTip: use --model\r\n")
+        old = cr.run_cli
+        cr.run_cli = lambda names, args: listing if (names, args) == (["cursor-agent"], ["--list-models"]) else ""
+        try:
+            self.assertEqual(cr.catalog("cursor"), ["gemini-4-argon-medium", "gemini-3.8-flash-low", "gemini-3.8-flash-medium", "claude-sonnet-5-5-high"])
+            code, r = self.run_cli("resolve", "--family", "gemini", "--line", "flash", "--effort", "low", "--source", "cursor", "--state", self.state)
+            self.assertEqual(r["slug"], "gemini-3.8-flash-low")
+        finally:
+            cr.run_cli = old
+
+
 class EffortWords(Env):
     def test_none_and_minimal_are_efforts_not_lines(self):
         self.assertEqual(cr.parse_slug("gpt-5.6-sol-none")["effort"], "none")

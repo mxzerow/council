@@ -1,6 +1,6 @@
 # Seat dispatch: common rules (Claude Code, PowerShell)
 
-Read this once before the first CLI seat, then only the recipe for each transport the run uses (`agy.md`, `codex.md`, `grok.md`).
+Read this once before the first CLI seat, then only the recipe for each transport the run uses (`agy.md`, `codex.md`, `grok.md`; `cursor.md` only as a fallback).
 
 - Use the **PowerShell tool**, not Bash. Bash does not reliably see `agy`/`codex`/`agent` on PATH, and a Bash command whose text mentions an agent CLI is intercepted by the delegation hook. PowerShell needs its PATH refreshed once per session:
   `$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")`
@@ -50,4 +50,4 @@ binary not found · authentication required or login rejected · `permission-gat
 
 ## Preflight
 
-Before the first seat of each transport, write `<run>\cli-preflight.txt` containing exactly `PREFLIGHT-OK`, run the transport's real invoke recipe with a prompt to read that file and reply with its contents, and require exit 0 and `PREFLIGHT-OK` in the reply. A failure skips remaining seats of **that transport only** (`cli-preflight-agent` / `-agy` / `-codex`).
+Before the first seat of each transport, write `<run>\cli-preflight.txt` containing exactly `PREFLIGHT-OK`, run the transport's real invoke recipe with a prompt to read that file and reply with its contents, and require exit 0 and `PREFLIGHT-OK` in the reply. A failure skips remaining seats of **that transport only** (`cli-preflight-agent` / `-agy` / `-codex` / `-cursor`).

@@ -29,7 +29,7 @@ From that shared root, read:
 - `config.yaml` — the `seats:` roster, `show_exchange`, `runs_dir`
 - `reviewer-envelope.md` — envelope contract (inline it; never list `meta.md`)
 - `reviewer-prompt.md` — breadth-auditor addendum
-- `recipes/common.md` and, **only for the transports the run uses**, `recipes/agy.md` (gemini), `recipes/codex.md` (gpt), `recipes/grok.md` (grok)
+- `recipes/common.md` and, **only for the transports the run uses**, `recipes/agy.md` (gemini), `recipes/codex.md` (gpt), `recipes/grok.md` (grok), and `recipes/cursor.md` only when falling back
 - `scripts/council_parse.py` — envelope parser (run with `python -I`)
 - `partitioning.md` — only when the input is too large for one cascade
 
@@ -73,7 +73,7 @@ The orchestrator is always Claude (`family: claude`). **Any `claude`-family seat
 
 | Seat `family` | Transport |
 |---|---|
-| `gemini` | `agy` |
+| `gemini` | `agy`; on a seat-level failure of `agy` (quota, auth, network, timeout, no catalog) fall back to `cursor-agent` ([`recipes/cursor.md`](../recipes/cursor.md), Cursor's quota) |
 | `gpt` | `codex` |
 | `grok` | Grok CLI (`agent`) |
 | `claude` | reviewers: skipped (same family). Rewriter: Agent-tool subagent, `model: sonnet` |

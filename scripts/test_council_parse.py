@@ -83,6 +83,27 @@ class Mint(Base):
         self.assertEqual(code, 0)
         self.assertEqual(s["gaps"]["ids"], ["G1-1"])
 
+    def test_gap_text_that_quotes_sentinels_does_not_confuse_the_parser(self):
+        # seen live: a reviewer of a plan about this protocol quoted <<<COUNCIL_REVISED>>> inside a gap
+        quoted = ("- blocking: The parser strips `<<<COUNCIL_REVISED>>>` and then reads <<<COUNCIL_END>>> too early,"
+                  " and a `<<<COUNCIL_STATUS>>>` block may be missing.\n- optional: second")
+        code, s = self.parse(1, env(gaps=quoted))
+        self.assertEqual((code, s["gaps"]["blocking"], s["gaps"]["optional"]), (0, 1, 1))
+        self.assertIn("COUNCIL_REVISED", self.read("gaps.md"))     # the quote survives in the gap text
+
+    def test_quoted_sentinel_before_the_real_one_on_its_own_line(self):
+        text = ("<<<COUNCIL_STATUS>>>\n- none\n<<<COUNCIL_GAPS>>>\n"
+                "- blocking: see the sentinel <<<COUNCIL_UNRESOLVED>>> in section 4\n"
+                "<<<COUNCIL_UNRESOLVED>>>\n- none\n<<<COUNCIL_REVISED>>>\nUNCHANGED\n<<<COUNCIL_END>>>\n")
+        code, s = self.parse(1, text)
+        self.assertEqual((code, s["gaps"]["blocking"]), (0, 1))
+
+    def test_still_malformed_when_a_required_marker_is_really_missing(self):
+        code, s = self.parse(1, "<<<COUNCIL_STATUS>>>\n- none\n<<<COUNCIL_GAPS>>>\n- blocking: mentions <<<COUNCIL_REVISED>>> only\n<<<COUNCIL_END>>>\n")
+        self.assertEqual(code, 0)    # the quoted mention is accepted as the fallback REVISED marker, END closes it
+        code, s = self.parse(2, "<<<COUNCIL_STATUS>>>\n- none\n<<<COUNCIL_GAPS>>>\n- none\n")
+        self.assertEqual((code, s["reason"]), (3, "missing_revised_marker"))
+
     def test_json_wrapper_response_field_from_agy(self):
         wrapped = json.dumps({"conversation_id": "x", "status": "SUCCESS", "response": env(gaps="- blocking: x"),
                               "usage": {"input_tokens": 15434, "output_tokens": 200}})

@@ -82,7 +82,7 @@ Machine-specific overrides go in `config.local.yaml` (gitignored; see [`config.l
 | [`catalog.md`](catalog.md) | Cursor Task model reference |
 | [`recipes/`](recipes/) | Per-CLI call recipes for Claude Code (`common`, `agy`, `codex`, `grok`) |
 | [`partitioning.md`](partitioning.md) | What to do when the input is too big for one cascade |
-| [`scripts/`](scripts/) | `council_parse.py` (reply parser and run state), `council_resolve.py` (newest model version), `council_rewrite.py` (safe chunked rewrite) |
+| [`scripts/`](scripts/) | `council_parse.py` (reply parser and run state), `council_resolve.py` (newest model version), `council_rewrite.py` (safe chunked rewrite), `council_prompt.py` (builds seat prompts, inline when they fit) |
 
 ## Tests
 

@@ -85,7 +85,7 @@ The default reviewers (Gemini Argon → GPT Sol) run as **Argon → Sol**, then 
 
 For each seat core.md says to dispatch:
 
-1. Write `seat-<n>-prompt.md` (fields per core.md § Cascade loop; state that the seat is **gaps only**).
+1. Build the seat prompt with `council_prompt.py build` (core.md § Cascade loop, step 3): inline when it fits, file mode when not. Run `agy` from the empty working directory `<runs_dir>\_cwd`.
 2. Run the seat's transport recipe (`recipes/agy.md`, `recipes/codex.md` or `recipes/grok.md`, built on `recipes/common.md`). Before the first seat of each transport, run that transport's preflight. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-codex`); the others still run.
 3. Save the raw reply to `seat-<n>-<slug>.md` (Codex: the fresh `-o` file) and run the parser; read only its JSON summary (core.md § Envelope parser). On exit 3 or 4 retry once, then re-run with `--final-attempt`; never a third dispatch.
 4. If `role: breadth-auditor` minted blocking gaps, later seats must STATUS them (the parser enforces this).

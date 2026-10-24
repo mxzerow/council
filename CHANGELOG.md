@@ -28,6 +28,7 @@ wording fixes that don't change behavior.
 
 ### Added
 
+- **Token efficiency for Gemini (`agy`), measured.** A call carries about 14-15k tokens of fixed agent overhead and a file read is a second call, so reviewer prompts are now built by `scripts/council_prompt.py` and sent **inline** (everything in the prompt, one call, no tools) whenever they fit on a command line, with automatic fallback to the old file-read form. Inline cut input by 19-25% on the breadth review; running `agy` from an empty folder saves about 1.2k more tokens and halves startup; low effort removed all thinking tokens and halved the time with the same coverage in two trials (the breadth seat stays at medium until more samples). A direct Gemini API script, `thinkingBudget` in `settings.json` and context caching were evaluated and not adopted (see `recipes/agy.md`).
 - **Rewriter fallback chain.** Several `rewriter` seats are tried in order (Gemini Argon, Gemini Flash, Claude Sonnet, all newest of their line); the first that resolves and works does the whole rewrite. Needed because the Cursor Task list has no Gemini Flash. Rewrite chunks are sent inline in the prompt at low effort: measured on `agy`, a file read doubles input tokens (34k against 17.7k) and one medium-effort call spent 13.9k thinking tokens. `agy` calls use `--output-format json`, which also reports token usage.
 - `scripts/council_parse.py`: parses replies, mints gap IDs, applies STATUS, restores dropped dissent, and renders the packet files from `gaps.json`. The orchestrator reads a one-line summary instead of the full reply.
 - `scripts/council_resolve.py`: newest-version-of-the-same-line resolver, rejected-model cooldown, last-good fallback, failure classifier.
@@ -42,6 +43,7 @@ wording fixes that don't change behavior.
 
 ### Fixed
 
+- The reply parser mistook a reviewer's quoted marker (for example `<<<COUNCIL_REVISED>>>` inside a gap about the protocol) for the real one and rejected a good envelope as "sentinels out of order". It now looks for markers in order and prefers ones alone on their line. Found by the inline-mode trial; it would have hit any council that reviews this skill.
 - Codex seats failed with "blocked by policy" because `--ignore-user-config` dropped the Windows sandbox setting; the recipe now passes `-c windows.sandbox="unelevated"`.
 - Three independent Codex reviews of the new scripts found and drove fixes for 13 blocking defects (state races, a model-rejection cache poisoned by auth errors, dated slugs outranking newer versions, placeholders colliding with document text, indented code left editable, version and sign changes going undetected, and others); the Claude Code path was then verified with a full live run.
 

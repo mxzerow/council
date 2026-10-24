@@ -11,10 +11,11 @@ Read this once before the first CLI seat, then only the recipe for each transpor
 ## Shared helper
 
 ```powershell
-function Invoke-Seat([string]$exe, [string[]]$tokens, [int]$ms, [string]$outFile, [string]$errFile) {
+function Invoke-Seat([string]$exe, [string[]]$tokens, [int]$ms, [string]$outFile, [string]$errFile, [string]$cwd = "") {
   $utf8 = New-Object System.Text.UTF8Encoding $false
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $exe; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+  if ($cwd) { $psi.WorkingDirectory = $cwd }               # see "Empty working directory" below
   $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
   $psi.StandardOutputEncoding = $utf8; $psi.StandardErrorEncoding = $utf8
   foreach ($t in $tokens) { $psi.ArgumentList.Add($t) }   # one argv entry per token
@@ -34,6 +35,10 @@ function Stop-Tree([int]$id) {
 ```
 
 If `ProcessStartInfo.ArgumentList` is missing (Windows PowerShell 5.1), run the same code under `pwsh -NoProfile`; if neither works, fail `ps-runtime`. Timeout = `cli_timeout_sec` from `config.yaml` (default 180, shipped 600) × 1000 ms.
+
+## Empty working directory (`agy`)
+
+Run `agy` with `$cwd` set to an **empty folder** (`<runs_dir>\_cwd`, create it if missing), not the project folder. Measured 2026-10-23: a trivial call cost 14,252 input tokens from an empty folder against 15,434 from a large git repo, and started in 5 s instead of 10 s. `--disable-slash-commands` changed nothing. The rest of the roughly 14k is the agent's own fixed prompt and cannot be reduced from outside. Pass packet paths as absolute paths; an empty working directory does not affect `--add-dir`.
 
 ## Files per seat (in the run folder)
 

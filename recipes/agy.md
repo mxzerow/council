@@ -6,21 +6,40 @@ Family `gemini`. Common rules and the `Invoke-Seat` helper: [common.md](common.m
 - **Install / sign in (no API key):** `irm https://antigravity.google/cli/install.ps1 | iex`, open a **new** terminal, run `agy`, choose **Google OAuth**. Binary: `%LOCALAPPDATA%\agy\bin\agy.exe`. Paste any auth code into that terminal, never into chat. Never set or request `GEMINI_API_KEY`.
 - **Catalog:** `agy models` (tab-separated `slug<TAB>label`).
 
-## Invoke (review-only)
+## Invoke (reviewer seats): inline by default
+
+Build the prompt with the builder; do not assemble it by hand:
 
 ```powershell
-$tokens = @('--add-dir', $skillRoot, '--add-dir', $run)
-foreach ($r in $reviewRoots) { $tokens += @('--add-dir', $r) }
-$tokens += @('--model', $slug)            # optionally also '--effort', $effort
-$tokens += @('-p', "Read $promptFile and the absolute paths it lists. Return only the Council sentinel envelope. Do not write workspace files.")
-$r = Invoke-Seat $agy $tokens ($timeoutSec * 1000) $outFile $errFile
+$b = python -I "$shared\scripts\council_prompt.py" build --run $run --seat $n --label $label --family gemini --role $role --total $total | ConvertFrom-Json
+if ($b.mode -eq 'inline') {
+  # everything is in the prompt: one model call, no tools, no --add-dir
+  $tokens = @('--model', $slug, '--output-format', 'json', '-p', [IO.File]::ReadAllText($b.prompt_file))
+} else {
+  # the packet did not fit on the command line: the seat reads the files itself (a second model call)
+  $tokens = @('--add-dir', $shared, '--add-dir', $run) + ($reviewRoots | ForEach-Object { '--add-dir', $_ }) + @('--model', $slug, '--output-format', 'json', '-p', $b.pointer)
+}
+$r = Invoke-Seat $agy $tokens ($timeoutSec * 1000) $outFile $errFile "$runsDir\_cwd"      # empty working directory
 ```
 
-**`--add-dir` is required, not optional.** Headless `agy` auto-denies `read_file` for any file inside a recognized project or git workspace that was not passed with `--add-dir`, even when the process's own working directory is that project (reproduced 2026-09-06). Always pass the skill root and the run folder, **plus every review root** that `meta.md` / `request.md` names; one `--add-dir` per distinct root. A scratch or non-project path does not need it. Never pass `--dangerously-skip-permissions`, `--yolo` or `--approval-mode yolo`.
+- `auto` mode chooses inline when the whole prompt is at most 24,000 characters (the Windows command line allows about 32k), else file mode. Force one with `--mode inline|file`.
+- The reply is JSON: take `.response` (the parsers unwrap it) and keep `.usage` in `seat-<n>-argv-meta.txt`.
+- **`--add-dir` is required in file mode, not optional.** Headless `agy` auto-denies `read_file` for any file inside a recognized project or git workspace that was not passed with `--add-dir`, even when the working directory is that project (reproduced 2026-09-06). Pass the shared root and the run folder, **plus every review root** that `meta.md` / `request.md` names. A scratch or non-project path does not need it. Never pass `--dangerously-skip-permissions`, `--yolo` or `--approval-mode yolo`.
+- `--workspace` and `--trust` no longer exist on `agy`, and `--print` followed by another flag needs the attached form `--print=<prompt>`; an argument-parsing error (not a permission one) means this drift.
+- Failure classes: see common.md. Preflight: common.md, with `--model` set to the first configured `gemini` slug.
 
-`--workspace` and `--trust` no longer exist on `agy`, and `--print` followed by another flag needs the attached form `--print=<prompt>`; an argument-parsing error (not a permission one) means this drift.
+**Measured on the breadth review (Argon, 2026-10-23, one sample per cell):**
 
-Reply = stdout. Failure classes: see common.md. Preflight: common.md, with `--model` set to the first configured `gemini` slug.
+| Packet | Variant | Input tokens | Thinking | Time | Gaps | Coverage |
+|---|---|---|---|---|---|---|
+| 2.5 KB doc | file-read, medium (old) | 20,845 | 229 | 45 s | 9+2 | 5/5 planted flaws |
+| | inline, medium | 15,520 | 967 | 41 s | 9+2 | 5/5 |
+| | inline, low | 15,524 | 0 | 24 s | 9+2 | 5/5 |
+| 8.5 KB plan | file-read, medium (old) | 21,539 | 3,601 | 77 s | 9+2 | 8/9 themes |
+| | inline, medium | 17,364 | 2,420 | 63 s | 8+2 | 7/9 |
+| | inline, low | 17,359 | 0 | 30 s | 9+2 | 7/9 |
+
+Inline saves 19-25% of input. Low effort removes the thinking tokens and halves the time; coverage was the same within the noise of one sample (the 8/9 vs 7/9 is one keyword theme). The breadth seat stays at `medium` in `config.yaml` until more samples justify `low`.
 
 ## Cost: what a call really costs (measured 2026-10-23)
 
@@ -38,7 +57,7 @@ Put the chunk **in the prompt**; do not ask the model to read it:
 $text  = [IO.File]::ReadAllText("$run\rewrite\chunk-$i-prompt.md")
 $tail  = "`n`nDo not use any tools or read any files. Output only the rewritten chunk followed by the final REWRITE_END line."
 $tokens = @('--model', $slug, '--output-format', 'json', '-p', ($text + $tail))     # no --add-dir needed: nothing is read
-$r = Invoke-Seat $agy $tokens ($timeoutSec * 1000) $outFile $errFile                # $outFile is JSON; pass it to council_rewrite.py check
+$r = Invoke-Seat $agy $tokens ($timeoutSec * 1000) $outFile $errFile "$runsDir\_cwd"   # $outFile is JSON; pass it to council_rewrite.py check
 ```
 
 - Use the rewriter seat's effort (`-low` model variant). Rewriting is mechanical; on the same real chunk, low and medium both passed the validator, and low added fewer explanations (25 against 34).

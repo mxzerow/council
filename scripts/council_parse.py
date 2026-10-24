@@ -170,13 +170,30 @@ def unwrap(raw):
     return raw
 
 
+def _find_after(text, s, start, anchored_only=False):
+    """Next occurrence of sentinel s at or after start. A marker alone on its line is the real one;
+    a quoted mention inside prose (a gap that discusses the protocol) is only a fallback."""
+    m = re.compile(r"(?m)^[ \t]*" + re.escape(s) + r"[ \t]*$").search(text, start)
+    if m:
+        return m.start() + (m.group(0).index(s))
+    if anchored_only:
+        return -1
+    return text.find(s, start)
+
+
 def split_envelope(text):
-    pos = {}
-    for name in ORDER:
-        s = SENT[name]
-        i = text.rfind(s) if name == "END" else text.find(s)
+    pos, cur = {}, 0
+    for name in ORDER[:-1]:
+        # search forward only, so the sections are in order by construction
+        i = _find_after(text, SENT[name], cur)
         if i >= 0:
             pos[name] = i
+            cur = i + len(SENT[name])
+    # END: the last marker alone on its line, else the last occurrence anywhere (the last END wins)
+    ends = [m.start() + m.group(0).index(SENT["END"]) for m in re.finditer(r"(?m)^[ \t]*" + re.escape(SENT["END"]) + r"[ \t]*$", text)]
+    end = ends[-1] if ends else text.rfind(SENT["END"])
+    if end >= 0 and end >= cur:
+        pos["END"] = end
     if not pos:
         return None, "no_sentinel"
     for need in ("REVISED", "END"):

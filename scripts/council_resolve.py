@@ -261,7 +261,8 @@ def cmd_resolve(a):
         slugs = catalog(a.source)
     except UsageError as e:
         lg = st["last_good"].get(key)
-        if lg and lg not in excluded and not cooling(st, lg, today):
+        refused = a.source == "api" and "enabled is false" in str(e)  # a disabled lane never serves last_good
+        if lg and not refused and lg not in excluded and not cooling(st, lg, today):
             print(json.dumps({"status": "ok", "slug": lg, "from": "last_good", "key": key, "warning": str(e)}))
         else:
             print(json.dumps({"status": "skip", "reason": "no-catalog", "key": key, "detail": str(e)}))

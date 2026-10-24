@@ -316,6 +316,8 @@ def build_parser():
 
 def main(argv=None):
     start, key, args = time.monotonic(), os.environ.get('COUNCIL_GEMINI_API_KEY', ''), None
+    if not KEY_PATTERN.fullmatch(key):
+        key = ''  # an unvalidated value must not be used as a redaction needle (would garble output)
     summary = dict(status='failed', **{'class': 'config'}, model=None, http=None,
                    usage=dict(prompt=0, thoughts=0, output=0, total=0), finish_reason=None,
                    seconds=0, tier=None, max_output=None, detail=None)
@@ -328,8 +330,9 @@ def main(argv=None):
             print(redact(json.dumps(config), key))
             return 0
         if args.command == 'models':
+            live_key = ready(config)  # raises the same config errors list_models would
             for slug in list_models(args.root):
-                print(redact(slug, key))
+                print(redact(slug, live_key))
             return 0
         if args.command == 'call':
             summary['model'] = args.model

@@ -288,6 +288,11 @@ class APISource(Env):
         self.assertTrue(cr.cooling(state, 'gemini-3.8-flash', date(2026, 10, 30)))
         self.assertFalse(cr.cooling(state, 'gemini-3.8-flash', date(2026, 10, 31)))
 
+    def test_disabled_lane_never_serves_last_good(self):
+        self.run_cli('mark-good', '--key', 'gemini/flash/', '--slug', 'gemini-3.8-flash', '--state', self.state)
+        with patch.object(cga, 'list_models', side_effect=cga.APIError('gemini_api.enabled is false', 'config')):
+            self.assertEqual(self.api_resolve()[1]['reason'], 'no-catalog')
+
     def test_unreachable_last_good_and_excluded_last_good(self):
         with patch.object(cga, 'list_models', side_effect=cga.APIError('synthetic unavailable', 'network')):
             self.assertEqual(self.api_resolve()[1]['reason'], 'no-catalog')

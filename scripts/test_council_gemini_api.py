@@ -110,6 +110,18 @@ class API(unittest.TestCase):
         self.assertNotIn(KEY, out.getvalue() + err.getvalue())
         return code, json.loads(out.getvalue()), err.getvalue()
 
+    def test_models_output_redacts_key_and_bad_env_value_is_not_a_needle(self):
+        out = io.StringIO()
+        with patch.object(cga, 'list_models', return_value=['gemini-' + KEY, 'gemini-3.8-flash']), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(cga.main(['models', '--root', str(self.root)]), 0)
+        self.assertNotIn(KEY, out.getvalue())
+        self.assertIn('gemini-3.8-flash', out.getvalue())
+        os.environ['COUNCIL_GEMINI_API_KEY'] = 's'  # invalid format: must not garble `config` output
+        code, result, _ = self.cli('config')
+        self.assertEqual(code, 0)
+        self.assertIn('gemini_transport', result)
+
     def test_success_header_usage_and_body(self):
         code, result, _ = self.cli()
         self.assertEqual((code, result['status'], result['class']), (0, 'ok', 'ok'))

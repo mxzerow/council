@@ -1,4 +1,20 @@
 show_exchange: ask
+# Gemini route (core.md, Gemini transport). Ordered: primary, then fallbacks.
+# agy = Antigravity CLI (Claude Code only); cursor = Cursor CLI or Task.
+# api = Gemini Developer API with your own key (needs gemini_api.enabled: true).
+gemini_transport: [agy, cursor]
+
+gemini_api:
+  enabled: false        # true to allow the api transport
+  tier: free            # free | paid; free may use prompts/replies for product improvement
+  free_tier_ack: false   # free must be acknowledged; never send PHI/confidential text
+  # timeout_sec: 1200   # per call; default 1200 free, 300 paid (30..3600)
+  thinking_level: high  # low | medium | high; independent of seat effort
+  max_output_review: 32768
+  max_output_rewrite: 65536
+  max_model_steps: 2    # lower versions of same line after 404/400-model/429/503
+  # key_file: set in config.local.yaml; default ~/.council/gemini.key
+
 # runs_dir: where run folders (and later resolver state) live. Resolution order:
 # config.local.yaml (gitignored) > this file > default ~/.council/runs (outside the skill folder, so syncing or
 # copying the skill never uploads past council text). Omit to use the default.

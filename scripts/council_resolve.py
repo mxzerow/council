@@ -10,14 +10,15 @@ classifies CLI failures so only a real model rejection is cached.
 Standard library only. Run with `python -I scripts/council_resolve.py <command> ...`.
 
 Commands
-  resolve  --family F --line L [--effort E] [--pin SLUG] --source S [--state FILE] [--today YYYY-MM-DD]
-  mark-rejected --slug SLUG --state FILE [--reason TEXT] [--today YYYY-MM-DD]
+  resolve  --family F --line L [--effort E] [--pin SLUG] --source S [--exclude SLUG ...] [--state FILE] [--today YYYY-MM-DD]
+  mark-rejected --slug SLUG --state FILE [--reason TEXT] [--days N] [--today YYYY-MM-DD]
   mark-good     --key family/line/effort --slug SLUG --state FILE
   classify      --file FILE            print: model-rejected|quota|auth|network|timeout|other
   list          --source S [--family F]  parsed catalog entries, one per line
 
 Sources (--source)
   agy          run `agy models`
+  api          Gemini Developer API catalog (opt-in); stable generateContent models only
   codex        read ~/.codex/models_cache.json (UTF-8), entries with visibility "list"
   grok         run `agent models`
   cursor       run `cursor-agent --list-models` (a fallback lane for any family Cursor serves)
@@ -37,6 +38,8 @@ import tempfile
 import time
 from datetime import date, datetime
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 FAMILIES = ("gemini", "gpt", "claude", "grok", "composer")
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]   # `-none` / `-minimal` slugs exist (Cursor, Gemini 3.6)
 # Modifier tokens never name a line. Plain variants win over these at equal version.
@@ -51,7 +54,7 @@ class UsageError(Exception):
 
 # ------------------------------------------------------------------ slug parsing
 def parse_slug(slug):
-    """Return dict(slug, family, line, version(tuple), effort, mods) or None."""
+    """Return dict(slug, family, line, version(tuple), effort, mods, extras) or None."""
     toks = slug.strip().lower().split("-")
     if toks and toks[0] == "cursor":
         toks = toks[1:]
@@ -79,7 +82,7 @@ def parse_slug(slug):
     mods = [a for a in alpha if a in MODS]
     lines = [a for a in alpha if a not in MODS]
     return {"slug": slug.strip(), "family": family, "line": lines[0] if lines else family,
-            "version": version, "effort": effort, "mods": mods}
+            "version": version, "effort": effort, "mods": mods, "extras": lines[1:]}
 
 
 # ------------------------------------------------------------------ catalog sources
@@ -101,7 +104,13 @@ def run_cli(names, args):
 def catalog(source):
     """Return a non-empty list of slugs, or raise UsageError if the catalog is unreachable or empty."""
     try:
-        if source == "agy":
+        if source == "api":
+            import council_gemini_api as cga
+            try:
+                slugs = cga.list_models(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            except cga.APIError as e:
+                raise UsageError(f"catalog unreachable (api): {e}") from None
+        elif source == "agy":
             out = run_cli(["agy"], ["models"]).replace("\r\n", "\n")
             slugs = [m.group(1) for m in re.finditer(r"^([a-z0-9][a-z0-9.\-]*)\t", out, re.M)]
         elif source == "grok":
@@ -217,7 +226,10 @@ def cooling(st, slug, today):
         d = datetime.strptime(r["date"], "%Y-%m-%d").date()
     except (KeyError, ValueError):
         return False
-    return (today - d).days < COOLDOWN_DAYS
+    days = r.get("days", COOLDOWN_DAYS)
+    if type(days) is not int or days < 1:
+        raise UsageError("state rejected days must be a positive integer")
+    return (today - d).days < days
 
 
 def vstr(v):
@@ -244,22 +256,27 @@ def cmd_resolve(a):
         return 0
     st = load_state(a.state)
     today = today_of(a)
+    excluded = set(a.exclude)
     try:
         slugs = catalog(a.source)
     except UsageError as e:
         lg = st["last_good"].get(key)
-        if lg and not cooling(st, lg, today):
+        if lg and lg not in excluded and not cooling(st, lg, today):
             print(json.dumps({"status": "ok", "slug": lg, "from": "last_good", "key": key, "warning": str(e)}))
         else:
             print(json.dumps({"status": "skip", "reason": "no-catalog", "key": key, "detail": str(e)}))
         return 0
     parsed = [p for p in (parse_slug(s) for s in slugs) if p]
-    same_line = [p for p in parsed if p["family"] == a.family and p["line"] == a.line]
+    if a.source == "api":
+        same_line = [p for p in parsed if p["family"] == a.family and
+                     ((p["line"] == a.line and not p["extras"]) or p["extras"] == [a.line])]
+    else:
+        same_line = [p for p in parsed if p["family"] == a.family and p["line"] == a.line]
     if not same_line:
         print(json.dumps({"status": "skip", "reason": "no-line-match", "key": key,
                           "detail": "no catalog entry for this family and line; lines never cross"}))
         return 0
-    skipped = [p["slug"] for p in same_line if cooling(st, p["slug"], today)]
+    skipped = [p["slug"] for p in same_line if p["slug"] in excluded or cooling(st, p["slug"], today)]
     usable = [p for p in same_line if p["slug"] not in skipped]
     if not usable:
         print(json.dumps({"status": "skip", "reason": "all-cooling-down", "key": key, "cooldown_skipped": skipped}))
@@ -279,11 +296,13 @@ def cmd_resolve(a):
 
 
 def cmd_mark_rejected(a):
+    if a.days < 1:
+        raise UsageError("--days must be a positive integer")
     with state_lock(a.state):
         st = load_state(a.state)
-        st["rejected"][a.slug] = {"date": today_of(a).isoformat(), "reason": a.reason or "model-rejected"}
+        st["rejected"][a.slug] = {"date": today_of(a).isoformat(), "reason": a.reason or "model-rejected", "days": a.days}
         save_state(a.state, st)
-    print(json.dumps({"status": "ok", "rejected": a.slug, "until_days": COOLDOWN_DAYS}))
+    print(json.dumps({"status": "ok", "rejected": a.slug, "until_days": a.days}))
     return 0
 
 
@@ -344,9 +363,11 @@ def build_parser():
     s.add_argument("--family", required=True); s.add_argument("--line", required=True)
     s.add_argument("--effort", default=None, choices=EFFORTS); s.add_argument("--pin", default=None)
     s.add_argument("--source", required=True); s.add_argument("--state", default=None); s.add_argument("--today", default=None)
+    s.add_argument("--exclude", action="append", default=[])
     s = sub.add_parser("mark-rejected")
     s.add_argument("--slug", required=True); s.add_argument("--state", required=True)
     s.add_argument("--reason", default=None); s.add_argument("--today", default=None)
+    s.add_argument("--days", type=int, default=COOLDOWN_DAYS)
     s = sub.add_parser("mark-good")
     s.add_argument("--key", required=True); s.add_argument("--slug", required=True); s.add_argument("--state", required=True)
     s = sub.add_parser("classify"); s.add_argument("--file", required=True)

@@ -13,6 +13,19 @@ PR (not backfilled later). One entry per PR, dated by merge date, using
 `Added` / `Changed` / `Fixed` / `Removed` sections as needed. Skip trivial
 wording fixes that don't change behavior.
 
+## 2026-10-24 — Gemini API transport (opt-in)
+
+### Added
+
+- Standard-library Python Gemini Developer API helper: config, preflight, paginated models and atomic review/rewrite calls. Keys come from an environment secret or local file, only enter the request header, and are redacted from errors and output. POSIX file permissions and an explicit free-tier privacy acknowledgment are enforced.
+- Independent Gemini transport order and API tier settings, with strict per-key local overrides. Default `[agy, cursor]` keeps the API disabled. README setup instructions and `recipes/api.md` document tiers, privacy, long calls and failures.
+- Offline fake-server tests for calls, key handling, config validation, failures and pagination; resolver and installer regressions. No live API calls were made for this implementation.
+
+### Changed
+
+- Gemini seats in both harnesses follow the configured chain. API quota/rejection/503 may step down within the same line, with a bounded call budget; timeouts never lower a model. Rewrite retries restart the whole stage when changing transport/model.
+- Resolver accepts `--source api`, invocation-only `--exclude` and per-entry cooldown `--days`; old cooldown entries still default to seven days. Installer copies five runtime scripts and excludes keys and local configs through its allowlist.
+
 ## 2026-10-23 — Unify the Cursor and Claude Code skills; gaps-only reviewers, Opus integration, rewriter chain
 
 ### Changed

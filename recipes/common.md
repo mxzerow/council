@@ -1,11 +1,11 @@
 # Seat dispatch: common rules (Claude Code, PowerShell)
 
-Read this once before the first CLI seat, then only the recipe for each transport the run uses (`agy.md`, `codex.md`, `grok.md`; `cursor.md` only as a fallback).
+Read this once before the first seat, then only the recipe for each transport the run uses (`agy.md`, `api.md`, `cursor.md`, `codex.md`, `grok.md`).
 
 - Use the **PowerShell tool**, not Bash. Bash does not reliably see `agy`/`codex`/`agent` on PATH, and a Bash command whose text mentions an agent CLI is intercepted by the delegation hook. PowerShell needs its PATH refreshed once per session:
   `$env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")`
 - Never pass secrets, `.env` contents or credentials in a prompt. Never request API keys in chat; sign-in happens in the user's own terminal.
-- Keep the CLI prompt **short**: tell the seat to read `seat-<n>-prompt.md` and the absolute paths it lists, and return only the Council envelope. Never put `artifact.md` on the command line (argv limit).
+- For tool-capable CLI seats use the prompt-builder's inline/pointer decision. API seats always build inline and pass the prompt file path to the Python helper; they have no tools or argv text limit. Never put secrets or `artifact.md` on the command line yourself.
 - Do not use `Start-Process -ArgumentList` (it space-splits), `Invoke-Expression`, `cmd /c`, or `2>&1` merging.
 
 ## Shared helper

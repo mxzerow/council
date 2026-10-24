@@ -11,7 +11,7 @@ description: >-
 
 You are the orchestrator. Council is a workflow, not a mode switch.
 
-This is a **sibling** of the Cursor `/council` skill. Claude Code has no Task-style model routing, so seats are dispatched by driving each vendor's CLI directly (`agy`, `codex`, Grok CLI). Everything else is shared.
+This is a **sibling** of the Cursor `/council` skill. Claude Code dispatches seats through vendor CLIs (`agy`, `codex`, Grok CLI), Cursor's CLI, or the opt-in Gemini API Python helper. Everything else is shared.
 
 **All cascade logic lives in `core.md` in the shared root. Read it first.** This file holds only what is Claude Code-specific: root resolution, Start, version resolution, the CLI dispatch mapping, and the Opus integration stage.
 
@@ -29,7 +29,7 @@ From that shared root, read:
 - `config.yaml` — the `seats:` roster, `show_exchange`, `runs_dir`
 - `reviewer-envelope.md` — envelope contract (inline it; never list `meta.md`)
 - `reviewer-prompt.md` — breadth-auditor addendum
-- `recipes/common.md` and, **only for the transports the run uses**, `recipes/agy.md` (gemini), `recipes/codex.md` (gpt), `recipes/grok.md` (grok), and `recipes/cursor.md` only when falling back
+- `recipes/common.md` and, **only for the transports the run uses**, `recipes/agy.md`, `recipes/api.md`, `recipes/cursor.md` (Gemini's configured chain), `recipes/codex.md` (gpt), `recipes/grok.md` (grok)
 - `scripts/council_parse.py` — envelope parser (run with `python -I`)
 - `partitioning.md` — only when the input is too large for one cascade
 
@@ -52,11 +52,11 @@ Cost: Codex CLI seats use ChatGPT/Codex quota when `codex login status` reports 
 
 ### Model resolution (Claude Code)
 
-Before showing the roster, resolve every non-skipped **gemini, gpt and grok** seat per core.md § Model resolution. Sources: `gemini` → `--source agy`, `gpt` → `--source codex`, `grok` → `--source grok`; state file `<runs_dir>\_resolved.json`. A `claude` or `composer` **reviewer** is skipped before resolving. A `claude` **rewriter** (Sonnet) is dispatched as a subagent and needs no resolving: the Agent tool's `model: sonnet` is the latest Sonnet.
+Before showing the roster, resolve every non-skipped **gemini, gpt and grok** seat per core.md § Model resolution. Gemini walks `gemini_transport`: `agy` → `--source agy`, `api` → `--source api`, `cursor` → `--source cursor`, with transport-specific preflight and re-resolution on fallback. Sources for other families: `gpt` → `--source codex`, `grok` → `--source grok`; state file `<runs_dir>\_resolved.json`. A `claude` or `composer` **reviewer** is skipped before resolving. A `claude` **rewriter** (Sonnet) is dispatched as a subagent and needs no resolving: the Agent tool's `model: sonnet` is the latest Sonnet.
 
 ### Runtime override
 
-Shared: core.md § Runtime override. Claude Code resolves override names with `--source agy|codex|grok` by family.
+Shared: core.md § Runtime override. Resolve names using the selected transport's source (`agy|api|cursor|codex|grok`).
 
 ## Seat 0 and the run folder (Claude Code)
 
@@ -73,7 +73,7 @@ The orchestrator is always Claude (`family: claude`). **Any `claude`-family seat
 
 | Seat `family` | Transport |
 |---|---|
-| `gemini` | `agy`; on a seat-level failure of `agy` (quota, auth, network, timeout, no catalog) fall back to `cursor-agent` ([`recipes/cursor.md`](../recipes/cursor.md), Cursor's quota) |
+| `gemini` | Follow `gemini_transport` in order: `agy` → [`recipes/agy.md`](../recipes/agy.md), `api` → [`recipes/api.md`](../recipes/api.md), `cursor` → [`recipes/cursor.md`](../recipes/cursor.md). See core.md § Gemini transport for availability and failures |
 | `gpt` | `codex` |
 | `grok` | Grok CLI (`agent`) |
 | `claude` | reviewers: skipped (same family). Rewriter: Agent-tool subagent, `model: sonnet` |
@@ -85,16 +85,18 @@ The default reviewers (Gemini Argon → GPT Sol) run as **Argon → Sol**, then 
 
 For each seat core.md says to dispatch:
 
-1. Build the seat prompt with `council_prompt.py build` (core.md § Cascade loop, step 3): inline when it fits, file mode when not. Run `agy` from the empty working directory `<runs_dir>\_cwd`.
-2. Run the seat's transport recipe (`recipes/agy.md`, `recipes/codex.md` or `recipes/grok.md`, built on `recipes/common.md`). Before the first seat of each transport, run that transport's preflight. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-codex`); the others still run.
+1. Build the seat prompt with `council_prompt.py build` (core.md § Cascade loop, step 3): API always `--mode inline`; other lanes inline when it fits, file mode when not. Run `agy` from the empty working directory `<runs_dir>\_cwd`.
+2. Run the selected transport recipe (`recipes/agy.md`, `recipes/api.md`, `recipes/cursor.md`, `recipes/codex.md` or `recipes/grok.md`, built on `recipes/common.md`). Before the first seat of each transport, run its preflight. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-api`, `cli-preflight-codex`); the others still run. Gemini follows core.md § Gemini transport, including API classes and bounded model steps.
 3. Save the raw reply to `seat-<n>-<slug>.md` (Codex: the fresh `-o` file) and run the parser; read only its JSON summary (core.md § Envelope parser). On exit 3 or 4 retry once, then re-run with `--final-attempt`; never a third dispatch.
 4. If `role: breadth-auditor` minted blocking gaps, later seats must STATUS them (the parser enforces this).
+
+**API long calls:** the shell foreground limit is 600 s. If call timeout + 60 s > 540 s (always with the default free timeout), run the PowerShell `call` tool invocation with `run_in_background: true`, then continue on its completion notification. Never poll or `sleep`. Otherwise use foreground tool timeout `(timeout + 60) * 1000` ms. The Python script enforces its socket timeout; do not kill a slow call early or downgrade because of latency. Record its one-line JSON summary (no key) in `seat-<n>-argv-meta.txt`; capture stderr separately and surface the free-tier reminder once per run.
 
 ### Rewrite stage
 
 After integration, run core.md § Stages step 4 with the rewriter chain, in order, until one works:
 
-- **`gemini` rewriter (Argon, Flash):** one `agy` call per chunk with the chunk **inside the prompt** and `--output-format json` ([`recipes/agy.md`](../recipes/agy.md) § Rewriter chunk calls). Resolve the model with `--source agy`; a `no-line-match` or `no-catalog` moves to the next seat.
+- **`gemini` rewriter (Argon, Flash):** follow `gemini_transport`, resolving with the selected transport's source. `agy` uses one inline chunk call with `--output-format json`; `api` uses the chunk plus rewrite tail via a prompt file and `--kind rewrite` (no seat effort override); `cursor` follows its recipe. Fix transport/model after chunk 1 succeeds; on later seat failure or exhausted API budget, `prepare` again and restart on the next transport/model before trying another rewriter. See core.md § Gemini transport for the one-voice and total-call rules.
 - **`claude` rewriter (Sonnet):** dispatch the `general-purpose` agent with `model: sonnet` and a file-based brief: read `rewrite/chunk-<i>-prompt.md`, write the rewritten chunk plus the final `REWRITE_END` line to `rewrite/chunk-<i>-reply.txt`, reply `DONE`. This uses no CLI quota, so it still works when `agy` is out. Save nothing yourself unless the file is missing.
 - Then `council_rewrite.py check` the reply file. Move down the chain only for the seat-level failures listed in core.md.
 
@@ -110,7 +112,7 @@ Shared: core.md § Return. If the full exchange was requested, append the transc
 
 `config.yaml` is shared with Cursor — edits here change both orchestrators' rosters (the single `seats:` list). When persisting, preserve `role: breadth-auditor` on Gemini unless the user explicitly removes it.
 
-1. Show what the live catalogs offer with `python -I scripts/council_resolve.py list --source agy|codex|grok [--family F]`.
+1. Show what the live catalogs offer with `python -I scripts/council_resolve.py list --source agy|api|cursor|codex|grok [--family F]`.
 2. Ask seat count (minimum 1), then for each seat in order: `family`, `line`, `effort`, optional `role`. GPT is dispatched through the **Codex CLI** here.
 3. Probe **that seat's transport** (its recipe's preflight) before accepting (`agy` vs `codex` vs Grok CLI independently). On failure, ask whether to keep it anyway or pick something else. Default `role: breadth-auditor` for the first Gemini seat.
 4. Ask whether to persist (writes the shared `config.yaml`) and the `show_exchange` default.

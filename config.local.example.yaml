@@ -1,5 +1,18 @@
 # Copy to config.local.yaml (gitignored by *.local.yaml) for machine-specific overrides.
 # Precedence: config.local.yaml > config.yaml > built-in default.
+# Values merge per key, including within gemini_api.
+# COUNCIL_GEMINI_API_KEY overrides key_file (cloud/CI secret); never put the key here.
+# gemini_transport: [agy, cursor]
+# gemini_api:
+#   enabled: false
+#   tier: free             # free | paid; free may use prompts/replies for product improvement
+#   free_tier_ack: false   # true required on free; never send PHI/confidential text
+#   timeout_sec: 1200      # default 1200 free, 300 paid; integer 30..3600
+#   thinking_level: high   # low | medium | high; independent of seat effort
+#   max_output_review: 32768
+#   max_output_rewrite: 65536
+#   max_model_steps: 2
+#   key_file: D:\Secrets\council\gemini.key
 
 # Keep run data outside the repo. Cursor Task seats must be able to read this path;
 # verify in Cursor before relying on a location outside the workspace.

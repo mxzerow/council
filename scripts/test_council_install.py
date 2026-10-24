@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -47,6 +48,26 @@ class Install(unittest.TestCase):
         with open(os.path.join(self.dest, "SKILL.md"), encoding="utf-8") as f:
             self.assertRegex(f.read(600), r"(?m)^name:\s*council\s*$")
         self.assertEqual(os.path.basename(self.dest), "council")
+
+    def test_secrets_and_local_configs_never_copied(self):
+        src = os.path.join(self.repo, 'synthetic-source')
+        for rel in ci.FILES:
+            target = os.path.join(src, rel)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copyfile(os.path.join(SOURCE, rel), target)
+        secrets = ('gemini.key', 'scripts/gemini.key', 'config.local.yaml', 'config.local.example.yaml')
+        for rel in secrets:
+            with open(os.path.join(src, rel), 'w', encoding='utf-8') as stream:
+                stream.write('synthetic private data')
+        code, _ = self.run_cli('install', '--target', self.repo, '--source', src)
+        self.assertEqual(code, 0)
+        with open(os.path.join(self.dest, ci.MANIFEST), encoding='utf-8') as stream:
+            manifest = json.load(stream)
+        for rel in secrets:
+            self.assertFalse(os.path.exists(os.path.join(self.dest, rel)))
+            self.assertNotIn(rel, manifest['files'])
+        self.assertTrue(os.path.isfile(os.path.join(self.dest, 'scripts/council_gemini_api.py')))
+        self.assertIn('scripts/council_gemini_api.py', manifest['files'])
 
     def test_reinstall_is_idempotent_and_check_is_in_sync(self):
         self.run_cli("install", "--target", self.repo)

@@ -4,6 +4,10 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import date
+from unittest.mock import patch
+
+import council_gemini_api as cga
 
 import council_resolve as cr
 
@@ -242,6 +246,54 @@ class EffortWords(Env):
         # but an effortless slug still beats a far-away explicit effort
         r = self.resolve("gpt", "sol", "medium", ["gpt-5.6-sol-max", "gpt-5.6-sol"])
         self.assertEqual(r["slug"], "gpt-5.6-sol")
+
+
+class APISource(Env):
+    SLUGS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-4-argon',
+             'gemini-9-flash-lite', 'gemini-9-flash-image', 'gemini-9-flash-tts', 'gemini-9-flash-customtools']
+
+    def api_resolve(self, *extra):
+        return self.run_cli('resolve', '--family', 'gemini', '--line', 'flash', '--source', 'api',
+                            '--state', self.state, *extra)
+
+    def test_api_filters_variants_and_preserves_line(self):
+        with patch.object(cga, 'list_models', return_value=self.SLUGS):
+            self.assertEqual(self.api_resolve()[1]['slug'], 'gemini-3.8-flash')
+        self.assertEqual(cr.parse_slug('gemini-3.8-flash-lite')['extras'], ['lite'])
+
+    def test_exclusions_are_ephemeral_and_reported(self):
+        with patch.object(cga, 'list_models', return_value=self.SLUGS):
+            code, result = self.api_resolve('--exclude', 'gemini-3.8-flash')
+            self.assertEqual((code, result['slug']), (0, 'gemini-3.6-flash'))
+            self.assertEqual(result['cooldown_skipped'], ['gemini-3.8-flash'])
+            args = [v for slug in self.SLUGS[:3] for v in ('--exclude', slug)]
+            self.assertEqual(self.api_resolve(*args)[1]['reason'], 'all-cooling-down')
+            self.assertEqual(self.api_resolve()[1]['slug'], 'gemini-3.8-flash')
+        self.assertFalse(os.path.exists(self.state))
+
+    def test_explicit_variant_line(self):
+        with patch.object(cga, 'list_models', return_value=self.SLUGS):
+            code, result = self.run_cli('resolve', '--family', 'gemini', '--line', 'lite', '--source', 'api')
+        self.assertEqual((code, result.get('slug')), (0, 'gemini-9-flash-lite'))
+
+    def test_per_entry_days_and_old_default(self):
+        code, result = self.run_cli('mark-rejected', '--slug', 'gemini-3.8-flash', '--state', self.state,
+                                   '--days', '1', '--reason', 'unavailable', '--today', '2026-10-24')
+        self.assertEqual((code, result['until_days']), (0, 1))
+        state = cr.load_state(self.state)
+        self.assertEqual(state['rejected']['gemini-3.8-flash']['days'], 1)
+        self.assertTrue(cr.cooling(state, 'gemini-3.8-flash', date(2026, 10, 24)))
+        self.assertFalse(cr.cooling(state, 'gemini-3.8-flash', date(2026, 10, 25)))
+        del state['rejected']['gemini-3.8-flash']['days']
+        self.assertTrue(cr.cooling(state, 'gemini-3.8-flash', date(2026, 10, 30)))
+        self.assertFalse(cr.cooling(state, 'gemini-3.8-flash', date(2026, 10, 31)))
+
+    def test_unreachable_last_good_and_excluded_last_good(self):
+        with patch.object(cga, 'list_models', side_effect=cga.APIError('synthetic unavailable', 'network')):
+            self.assertEqual(self.api_resolve()[1]['reason'], 'no-catalog')
+            self.run_cli('mark-good', '--key', 'gemini/flash/', '--slug', 'gemini-3.8-flash', '--state', self.state)
+            self.assertEqual(self.api_resolve()[1]['from'], 'last_good')
+            self.assertEqual(self.api_resolve('--exclude', 'gemini-3.8-flash')[1]['reason'], 'no-catalog')
 
 
 class Classify(unittest.TestCase):

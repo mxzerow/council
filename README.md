@@ -16,14 +16,75 @@ There is no parallel first-answers pass and no chairman synthesis. See [`core.md
 | Piece | Requirement |
 |-------|-------------|
 | Orchestrator | Cursor agent chat, or Claude Code |
-| Python 3 | Runs the helper scripts in [`scripts/`](scripts/) (standard library only) |
-| `gemini` seats | [Antigravity CLI](https://antigravity.google/cli) (`agy`), signed in with Google. No API key |
+| Python 3.10+ | Runs the helper scripts in [`scripts/`](scripts/) (standard library only) |
+| `gemini` seats | Configured `gemini_transport`: `agy`, opt-in Gemini Developer API (own key), or Cursor. Default `[agy, cursor]` |
 | `gpt` seats | [Codex CLI](https://github.com/openai/codex) (`codex login`). ChatGPT login uses ChatGPT/Codex quota |
 | `grok` seats | The Grok CLI (`agent` on PATH) |
 | Fallback for `gemini` seats | Cursor's CLI (`cursor-agent login`): used when `agy` is out of quota; spends Cursor usage |
-| Cursor | Every seat goes through Cursor's own Task tool, so the CLIs above are not needed there |
+| Cursor | Task by default; Gemini can use the API Python helper. The vendor CLIs above are not needed there |
 
 Recipes for calling each CLI are written for PowerShell on Windows ([`recipes/`](recipes/)).
+
+## Choosing how Gemini is called
+
+`gemini_transport` is an ordered fallback list, independent of `gemini_api.tier`. Default `[agy, cursor]` and `gemini_api.enabled: false` preserve existing behavior. Claude Code supports all three transports; Cursor silently skips `agy`, uses Task for `cursor`, and Shell for the API Python helper. A seat-level failure advances to the next configured transport, resolving the same family and line again.
+
+| Route | Needs | Latency | Cost | Privacy | Quota |
+|---|---|---|---|---|---|
+| `agy` | Antigravity CLI signed in with Google; Claude Code | Model/account dependent | Subscription quota | Antigravity account terms | Subscription quota |
+| `api`, free | Own Gemini Developer API key; enabled + free acknowledgment | Free 3.8 Flash ~150–170 s to first token in handoff measurements | Free within limits | Google may use prompts/replies for product improvement; human review possible | Argon returned 429 on free in handoff measurements |
+| `api`, paid | Own key with billing enabled; enabled + `tier: paid` | Expected faster; not measured here | Per-token API billing | Prompts/replies not used for product improvement under paid API terms | API project/model limits |
+| `cursor` | Cursor Task, or signed-in `cursor-agent` in Claude Code | Model/account dependent | Cursor usage | Cursor account terms | Cursor usage limits |
+
+**Do not send PHI or confidential text through the free tier.** Set `tier` to match the API project's billing; the setting does not provision billing or verify it. These measurements and privacy descriptions come from the implementation handoff; this change has been tested offline. See [the API recipe](recipes/api.md) for observed model errors, call details and the fallback table.
+
+Key-file setup (PowerShell 7, in your own terminal; never paste a key into chat):
+
+1. Create the private directory:
+
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\.council"
+   ```
+
+2. Enter the key without echo:
+
+   ```powershell
+   $s = Read-Host -AsSecureString "Gemini API key"
+   ```
+
+3. Write it locally:
+
+   ```powershell
+   [Net.NetworkCredential]::new('', $s).Password | Set-Content -NoNewline -Encoding ascii "$env:USERPROFILE\.council\gemini.key"
+   ```
+
+4. Check the account name with `whoami`, then restrict the file:
+
+   ```powershell
+   icacls "$env:USERPROFILE\.council\gemini.key" /inheritance:r /grant:r "$($env:USERDOMAIN)\$($env:USERNAME):(R,W)"
+   ```
+
+   A wrong principal fails with "No mapping between account names". Review the resulting ACL; Windows ACLs are managed by you, never modified by the script. On macOS/Linux use `chmod 600 ~/.council/gemini.key`; group/other access is refused.
+
+5. In `config.local.yaml` (gitignored), choose the chain and tier:
+
+   ```yaml
+   gemini_transport: [api, agy, cursor]
+   gemini_api:
+     enabled: true
+     tier: free           # or paid, matching your API project
+     free_tier_ack: true  # required only on free
+   ```
+
+   Per-key precedence: local config > shared config > defaults. Optional `key_file` goes inside `gemini_api`; see [config.local.example.yaml](config.local.example.yaml). Cloud/CI uses the `COUNCIL_GEMINI_API_KEY` secret, which overrides the file. Keys and `config.local*` are never copied by the installer.
+
+6. From the shared root, validate without generation:
+
+   ```powershell
+   python -I scripts/council_gemini_api.py preflight
+   ```
+
+Free calls default to 1200 s, paid to 300 s (`timeout_sec` overrides). Slow calls never downgrade a model. Only model rejection, quota or 503 can step down, at most `max_model_steps`, always within the same family and line. API thinking defaults to `high`, independently of seat effort. Review/rewrite output caps default to 32768/65536, clamped to the model's output limit. See [core.md](core.md#gemini-transport) for the complete contract.
 
 ## Install
 
@@ -61,11 +122,11 @@ Cloud agents work on a fresh clone of a repository and do not see `~/.cursor/ski
    python -I ~/.cursor/skills/council/scripts/council_install.py install --target /path/to/your/project
    ```
 
-2. Review `.cursor/skills/council/` in the project, then commit and push it. It holds the Cursor runtime files and four scripts only, no run data.
+2. Review `.cursor/skills/council/` in the project, then commit and push it. It holds the Cursor runtime files and five scripts only, no run data, key files or local configs.
 3. Start a cloud agent on that repository and run `/council`.
 4. To update later, run the same command again. A file you edited in the copy (for example `config.yaml`) is reported and left alone; add `--force` to overwrite it. `python -I .../council_install.py check --target ...` shows drift without changing anything.
 
-On a cloud machine the skill runs on Linux: paths use `/`, the scripts run as `python3` if `python` is missing, and run data goes to `~/.council/runs` on that machine and is discarded with it. Seats go through Cursor's Task tool, so the CLI recipes (`agy`, `codex`) are not used there. Not yet tested on a real cloud agent; the installed copy was checked to be discovered by a local `cursor-agent`.
+On a cloud machine the skill runs on Linux: paths use `/`, the scripts run as `python3` if `python` is missing, and run data goes to `~/.council/runs` on that machine and is discarded with it. Seats use Task or the opt-in API helper (key via `COUNCIL_GEMINI_API_KEY` secret); vendor CLI recipes (`agy`, `codex`) are not used there. Not yet tested on a real cloud agent; the installed copy was checked to be discovered by a local `cursor-agent`.
 
 ## Use
 
@@ -100,19 +161,20 @@ Machine-specific overrides go in `config.local.yaml` (gitignored; see [`config.l
 | Path | Role |
 |------|------|
 | [`core.md`](core.md) | The shared rules: roster, stages, parsing, model resolution, return format |
-| [`SKILL.md`](SKILL.md) | Cursor skill: paths, Start, how a seat is called through Task |
+| [`SKILL.md`](SKILL.md) | Cursor skill: paths, Start, Task/API dispatch |
 | [`claude/SKILL.md`](claude/SKILL.md) | Claude Code skill: Start, the CLI mapping, the Opus integration stage |
 | [`config.yaml`](config.yaml) | The roster and defaults (shared) |
 | [`reviewer-envelope.md`](reviewer-envelope.md), [`reviewer-prompt.md`](reviewer-prompt.md) | What a reviewer seat is told |
 | [`catalog.md`](catalog.md) | Cursor Task model reference |
-| [`recipes/`](recipes/) | Per-CLI call recipes for Claude Code (`common`, `agy`, `codex`, `grok`) |
+| [`recipes/`](recipes/) | Transport recipes (`common`, `agy`, `api`, `cursor`, `codex`, `grok`) |
 | [`partitioning.md`](partitioning.md) | What to do when the input is too big for one cascade |
-| [`scripts/`](scripts/) | `council_parse.py` (reply parser and run state), `council_resolve.py` (newest model version), `council_rewrite.py` (safe chunked rewrite), `council_prompt.py` (builds seat prompts, inline when they fit) |
+| [`scripts/`](scripts/) | `council_parse.py` (reply parser/state), `council_resolve.py` (newest model version), `council_rewrite.py` (safe chunked rewrite), `council_prompt.py` (seat prompts), `council_gemini_api.py` (opt-in API lane) |
+| [`recipes/api.md`](recipes/api.md) | API key setup pointer, tiers/timeouts, failures and rewrite calls |
 
 ## Tests
 
 ```bash
-cd scripts && python -B -m unittest discover -p "test_*.py"
+cd scripts && python -B -W error::ResourceWarning -m unittest discover -p "test_*.py"
 ```
 
 The scripts are what keeps the model-written parts honest: replies are parsed and bookkept by code, a reviewer cannot change the artifact, and a rewritten chunk is thrown away if it loses a number, a heading, a negation or any protected text.

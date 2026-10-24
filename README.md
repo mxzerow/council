@@ -43,6 +43,30 @@ ln -s ~/.cursor/skills/council/claude ~/.claude/skills/council
 
 Do **not** copy `claude/SKILL.md` on its own: it finds `core.md`, `config.yaml` and the scripts in the parent folder, and stops if they are missing.
 
+### Cursor cloud agents
+
+Cloud agents work on a fresh clone of a repository and do not see `~/.cursor/skills`. Pick one route.
+
+**Route A: sync your user skills.**
+
+1. In Cursor, open Settings, then Agents, then Context and Tools.
+2. Turn on "Sync Skills for Cloud Agents".
+3. Start a new cloud agent and run `/council`.
+
+**Route B: put a copy in the project repository.** Use this when the repository should carry the skill.
+
+1. Run (replace the path with your project):
+
+   ```bash
+   python -I ~/.cursor/skills/council/scripts/council_install.py install --target /path/to/your/project
+   ```
+
+2. Review `.cursor/skills/council/` in the project, then commit and push it. It holds the Cursor runtime files and four scripts only, no run data.
+3. Start a cloud agent on that repository and run `/council`.
+4. To update later, run the same command again. A file you edited in the copy (for example `config.yaml`) is reported and left alone; add `--force` to overwrite it. `python -I .../council_install.py check --target ...` shows drift without changing anything.
+
+On a cloud machine the skill runs on Linux: paths use `/`, the scripts run as `python3` if `python` is missing, and run data goes to `~/.council/runs` on that machine and is discarded with it. Seats go through Cursor's Task tool, so the CLI recipes (`agy`, `codex`) are not used there. Not yet tested on a real cloud agent; the installed copy was checked to be discovered by a local `cursor-agent`.
+
 ## Use
 
 ```
@@ -69,7 +93,7 @@ seats:
 
 A seat names a model family and line, never a version: the newest version of that line is picked from the live catalog on every run, and a different line is never substituted (Flash never becomes Argon). Add `pin: <exact slug>` to freeze a seat. An unrecognized `role` is a config error. A family with no way to be called in the current harness is skipped. Claude Code skips `claude` seats (same family as the orchestrator).
 
-Machine-specific overrides go in `config.local.yaml` (gitignored; see [`config.local.example.yaml`](config.local.example.yaml)), for example `runs_dir`. Run folders default to `runs/` next to `config.yaml`.
+Machine-specific overrides go in `config.local.yaml` (gitignored; see [`config.local.example.yaml`](config.local.example.yaml)), for example `runs_dir`. Run folders default to `~/.council/runs` (outside the skill folder).
 
 ## Layout
 
@@ -99,7 +123,7 @@ Verified live in Claude Code on 2026-10-23 (a full run: Gemini Argon, GPT Sol, O
 
 ## Run data
 
-`runs/` holds working state (prompts, artifacts, CLI logs). It is gitignored and must not be published: it can contain the text you sent through Council.
+`~/.council/runs` holds working state (prompts, artifacts, CLI logs). It can contain the text you sent through Council, which is why it lives outside the skill folder and outside git. On Windows with a small system drive, make `~/.council` a junction to another drive (`New-Item -ItemType Junction -Path $env:USERPROFILE\.council -Target D:\.council`).
 
 ## License
 

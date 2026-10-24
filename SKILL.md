@@ -27,6 +27,10 @@ Skill root is the directory that contains this `SKILL.md`. Resolve it to an **ab
 
 Never pass unresolved `~` into Shell or Task prompts. Expand it first.
 
+## Platform (Cursor cloud agents, Linux, macOS)
+
+This skill's paths are written Windows-style (`<run>\file`). On Linux or macOS, including Cursor cloud agents, use forward slashes and the real `~`. If `python` is not found, use `python3` for the scripts. Nothing else is Windows-specific for Cursor: seats go through Task, and the CLI recipes are for Claude Code only. In a cloud run the skill must be in the repo's `.cursor/skills/council/` (see the README) or synced; run data is created under `~/.council/runs` on that machine and is not kept after the run.
+
 ## Config defaults
 
 Read from [config.yaml](config.yaml). If a key is missing, use:
@@ -34,7 +38,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 | Key | Default |
 |-----|---------|
 | `show_exchange` | `ask` |
-| `runs_dir` | `<skill-root>\runs`. Resolved as `config.local.yaml` (gitignored) > `config.yaml` > this default; created if missing. Task seats must be able to read it, so keep it inside the workspace or skill tree until that is verified |
+| `runs_dir` | `~/.council/runs`, expanded to an absolute path. Resolved as `config.local.yaml` (gitignored) > `config.yaml` > this default; created if missing. It is outside the skill folder on purpose, so syncing or copying the skill never uploads past council text. A real Cursor run (2026-10-23) read run files outside the workspace without trouble |
 | `max_reviewers` | `7` (cap on the number of `seats`) |
 | `run_retention_count` | `10` |
 | `run_retention_days` | `14` |
@@ -95,7 +99,7 @@ Take the model slugs your Task tool offers (the list in its definition; drop `in
 
 ## Return (Cursor)
 
-Shared: [core.md](core.md#return). Cursor exchange handling: if exchange was requested, write `<run>/exchange.md` with the transcript and set `<skill-root>/last-exchange.md` to a single line with its absolute path (or run id). Secret-hygiene applies to both.
+Shared: [core.md](core.md#return). Cursor exchange handling: if exchange was requested, write `<run>/exchange.md` with the transcript and set `<runs_dir>/last-exchange.md` to a single line with its absolute path (or run id). Secret-hygiene applies to both.
 
 ## Reconfigure
 

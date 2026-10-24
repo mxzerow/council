@@ -3,4 +3,4 @@
 
 # Keep run data outside the repo. Cursor Task seats must be able to read this path;
 # verify in Cursor before relying on a location outside the workspace.
-# runs_dir: D:\Documents\.council-runs
+# runs_dir: D:\Documents\.council\runs

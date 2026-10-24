@@ -1,7 +1,8 @@
 show_exchange: ask
 # runs_dir: where run folders (and later resolver state) live. Resolution order:
-# config.local.yaml (gitignored) > this file > default <skill-root>/runs. Omit to use the default.
-# runs_dir: D:\Documents\.council-runs
+# config.local.yaml (gitignored) > this file > default ~/.council/runs (outside the skill folder, so syncing or
+# copying the skill never uploads past council text). Omit to use the default.
+# runs_dir: ~/.council/runs
 max_reviewers: 7
 cli_timeout_sec: 600
 run_retention_count: 10

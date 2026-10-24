@@ -22,7 +22,7 @@ wording fixes that don't change behavior.
 - **Reviewers are gaps-only.** A reviewer's Revised must be `UNCHANGED`; one Opus integration pass resolves every gap and prints each rejection with its reason at the end.
 - **Strict `role` validation** in both harnesses (previously Cursor was strict and Claude Code ignored typos).
 - **Models are resolved, not pinned.** A seat stores a family and line; the newest version of that line is picked from the live catalog each run, never crossing lines. A model the server rejects is skipped for 7 days; the last working model is the fallback when a catalog is unreachable.
-- Run data now lives under `runs/` next to `config.yaml` (override with `runs_dir` in `config.local.yaml`). The old `claude/runs/` (59 runs) was moved there.
+- Run data now lives in `~/.council/runs`, outside the skill folder (override with `runs_dir` in `config.local.yaml`), so syncing or copying the skill to a cloud agent never uploads past council text. The old `claude/runs/` and `runs/` folders were moved there.
 - `models.md` is split: `catalog.md` for Cursor, `recipes/` for each Claude Code CLI. A default run now loads about 42 KB in Claude Code (was about 61 KB) and about 35 KB in Cursor (was about 79 KB).
 - The Grok seat is called through the Grok CLI; the old Cursor `agent` recipe no longer applies.
 
@@ -34,6 +34,7 @@ wording fixes that don't change behavior.
 - `scripts/council_parse.py`: parses replies, mints gap IDs, applies STATUS, restores dropped dissent, and renders the packet files from `gaps.json`. The orchestrator reads a one-line summary instead of the full reply.
 - `scripts/council_resolve.py`: newest-version-of-the-same-line resolver, rejected-model cooldown, last-good fallback, failure classifier.
 - `scripts/council_rewrite.py`: masks protected text, rewrites in small chunks, checks every chunk, falls back per chunk or for the whole artifact, and reports every explanation added.
+- `scripts/council_install.py`: copies the Cursor runtime files into a project's `.cursor/skills/council/` so Cursor cloud agents can use the skill (they cannot see `~/.cursor/skills`). Never overwrites a file edited in the copy unless `--force`; `check` reports drift. README gained a "Cursor cloud agents" section (sync route and install route) and the Cursor `SKILL.md` a Platform note for Linux and macOS. A local `cursor-agent` found the installed copy as a project skill; a real cloud run is untested.
 - `partitioning.md` (oversize inputs), `config.local.example.yaml`, a minimum-review rule, and tests for all three scripts.
 
 ### Removed

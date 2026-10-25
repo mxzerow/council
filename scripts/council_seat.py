@@ -34,6 +34,13 @@ def resolve_launcher(transport, which=shutil.which, platform=sys.platform, env=o
     """Resolve only safe launchers; injectable discovery never launches a process."""
     def find(name):
         path = which(name)
+        if not path and name.lower().endswith('.ps1'):
+            # Python < 3.12 on Windows never matches an extension missing from PATHEXT: scan PATH for the exact name.
+            for folder in (env.get('PATH') or '').split(os.pathsep):
+                candidate = Path(folder) / name if folder else None
+                if candidate and candidate.is_file():
+                    path = str(candidate)
+                    break
         return path if path and Path(path).suffix.lower() not in ('.bat', '.cmd') else None
 
     def powershell(path):

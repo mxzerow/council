@@ -550,5 +550,20 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual((root / 'out').read_text(), prompt)
 
 
+class LauncherDiscovery(unittest.TestCase):
+    def test_cursor_ps1_found_by_exact_name_when_which_ignores_ps1(self):
+        # shutil.which on Windows with Python < 3.12 never matches '.ps1' (not in PATHEXT).
+        with tempfile.TemporaryDirectory() as folder:
+            script = Path(folder) / 'cursor-agent.ps1'
+            script.write_text('', encoding='utf-8')
+            shell = Path(folder) / 'pwsh.exe'
+            shell.write_text('', encoding='utf-8')
+            fake_which = lambda name: str(shell) if name == 'pwsh' else None
+            prefix, kind = seat.resolve_launcher('cursor', which=fake_which, platform='win32', env={'PATH': folder})
+        self.assertEqual(kind, 'powershell')
+        self.assertEqual(prefix[-1], str(script))
+        self.assertNotIn('-ExecutionPolicy', prefix)
+
+
 if __name__ == '__main__':
     unittest.main()

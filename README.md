@@ -36,7 +36,7 @@ Both origins default to `routes.<origin>.gemini: [api, agy]`. The API is disable
 | api, free | Own key; API enabled and free-tier acknowledgment | Free project/model limits | Prompts/replies may be used for product improvement and human review |
 | api, paid | Own key, billing enabled, `tier: paid` | Per-token billing and project/model limits | Check paid API terms for your account |
 
-**Never send PHI or confidential text through the free tier.** `tier` must match the API project's billing; it does not enable or verify billing. The wizard does not enable the API or change privacy acknowledgment. See [the API recipe](recipes/api.md) for measurements and setup notes.
+**Free-tier prompts and replies may be used by Google to improve its products and reviewed by humans.** `tier` must match the API project's billing; it does not enable or verify billing. The wizard does not enable the API or change privacy acknowledgment. See [the API recipe](recipes/api.md) for measurements and setup notes.
 
 Key-file setup (PowerShell 7, in your own terminal; never paste a key into chat):
 

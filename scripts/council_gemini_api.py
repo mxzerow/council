@@ -22,7 +22,7 @@ import urllib.request
 
 BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 FREE_WARNING = ('council: Gemini API free tier - Google may use prompts and replies to improve its products '
-                'and humans may review them; do not send PHI or confidential text.')
+                'and humans may review them.')
 DEFAULTS = dict(enabled=False, tier='free', free_tier_ack=False, thinking_level='high',
                 max_output_review=32768, max_output_rewrite=65536, max_model_steps=2,
                 unavailable_retry_wait_sec=20, unavailable_retries=1)

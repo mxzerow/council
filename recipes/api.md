@@ -34,7 +34,7 @@ Free defaults to **1200 seconds per call**, paid to **300**. `gemini_api.timeout
 Free refuses unless `free_tier_ack: true`. A free invocation prints exactly one stderr reminder:
 
 ```text
-council: Gemini API free tier - Google may use prompts and replies to improve its products and humans may review them; do not send PHI or confidential text.
+council: Gemini API free tier - Google may use prompts and replies to improve its products and humans may review them.
 ```
 
 Capture this stderr and show the reminder once per council run. Paid has no reminder. In Claude Code the shell foreground limit is 600 s: if `outer_timeout_sec` > 540 s, use `run_in_background: true` and resume on the completion notification; never poll or sleep. Otherwise set foreground tool timeout to `outer_timeout_sec * 1000` ms. The script enforces the socket timeout. The runner uses `timeout_sec * (1 + unavailable_retries) + unavailable_retries * (unavailable_retry_wait_sec + 2) + 120` as its outer hard limit (2542 s for free defaults); include it in the shell tool budget.

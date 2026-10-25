@@ -24,7 +24,7 @@ routes:
 gemini_api:
   enabled: false        # true (in config.local.yaml) to allow the api transport
   tier: free            # free | paid; free may use prompts/replies for product improvement
-  free_tier_ack: false  # free must be acknowledged; never send PHI/confidential text
+  free_tier_ack: false  # the free tier must be acknowledged (Google may use free-tier prompts to improve its products)
   # timeout_sec: 1200   # per call; default 1200 free, 300 paid (30..3600)
   thinking_level: high  # low | medium | high; independent of seat effort
   max_output_review: 32768

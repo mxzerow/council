@@ -29,7 +29,7 @@ wording fixes that don't change behavior.
 
 ### Changed
 
-- Gemini defaults to api then agy in both origins. Argon works out of the box with agy; the API is optional and disabled by default. Free-tier privacy acknowledgment remains required; never send PHI or confidential text through the free tier.
+- Gemini defaults to api then agy in both origins. Argon works out of the box with agy; the API is optional and disabled by default. Free-tier privacy acknowledgment remains required.
 - Default roster: Argon breadth, conditional Flash breadth fallback after all Argon routes fail, GPT Sol, then Flash/Sonnet rewriters. A fallback reuses its primary review slot and gap IDs.
 - Grok runs through the Cursor CLI; GPT/Claude use the allowed transports for the run origin. Installer includes the roster script and migration notes, never local config, presets, recipes or keys.
 

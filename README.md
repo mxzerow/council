@@ -183,13 +183,15 @@ The scripts are what keeps the model-written parts honest: replies are parsed an
 
 ## Status
 
-Verified live on 2026-10-23 in Claude Code (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite) and on 2026-10-25 in Cursor's own agent (three full runs on a synthetic doc). In the last Cursor run, with gemini_transport: [api, cursor, agy] and a free-tier API key:
+Verified live on 2026-10-23 in Claude Code (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite) and on 2026-10-25 in Cursor's own agent (three full runs on a synthetic doc). In the last Cursor run, with `gemini_transport: [api, cursor, agy]` and a free-tier API key:
 
-- Argon was refused by the free API tier (429), fell through to cursor-agent, and reviewed in 43 s; the rewrite also ran on cursor-agent (about 35 s a chunk, one chunk retried after a failed check).
+- Argon was refused by the free API tier (429), fell through to `cursor-agent`, and reviewed in 43 s; the rewrite also ran on `cursor-agent` (about 35 s a chunk, one chunk retried after a failed check).
 - In the run before it, Gemini Flash rewrote through the free API (about 200 s for a chunk).
-- GPT Sol and the Opus integration ran through Task; ailures.md was written by council_seat.py and no ad-hoc wrapper scripts were created.
+- GPT Sol and the Opus integration ran through Task; `failures.md` was written by `council_seat.py` and no ad-hoc wrapper scripts were created.
 
-Not yet verified: a Cursor cloud agent, the paid API tier, whether stripping MSYSTEM fixes the Cursor hook bug when cursor-agent is launched from Git Bash, and POSIX (macOS/Linux) execution of the runner (the code and its tests are written for it but ran on Windows only).
+The Cursor hook bug (`MSYSTEM` set plus any tool call makes `cursor-agent` evaluate its PowerShell hook wrapper in bash) was reproduced on 2026-10-25 and does not occur without `MSYSTEM`. Council seats make no tool calls, and the runner also strips `MSYSTEM` for `cursor-agent`, so it cannot affect them.
+
+Not yet verified: a Cursor cloud agent, the paid API tier, and POSIX (macOS/Linux) execution of the runner (the code and its tests are written for it but ran on Windows only).
 
 ## Run data
 

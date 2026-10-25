@@ -35,6 +35,8 @@ class Install(unittest.TestCase):
     def test_install_copies_only_what_cursor_needs(self):
         code, s = self.run_cli("install", "--target", self.repo)
         self.assertEqual((code, s["status"]), (0, "installed"))
+        for rel in ('scripts/council_roster.py', 'config.migrations.yaml'):
+            self.assertTrue(os.path.isfile(os.path.join(self.dest, rel)), rel)
         for rel in ci.FILES:
             self.assertTrue(os.path.isfile(os.path.join(self.dest, rel)), rel)
         for absent in ("claude", "recipes", "README.md", "CHANGELOG.md", "models.md", "runs", "config.local.yaml"):

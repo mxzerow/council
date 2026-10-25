@@ -53,6 +53,31 @@ class Base(unittest.TestCase):
             return f.read()
 
 
+class SeatState(Base):
+    def state(self, seat):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cp.main(['seat-state', '--run', self.run, '--seat', str(seat)])
+        self.assertEqual(code, 0)
+        return json.loads(out.getvalue())
+
+    def test_state_before_and_after_parse(self):
+        self.assertEqual(self.state(1), {'seat': 1, 'parsed': False})
+        self.assertEqual(self.parse(1, env())[0], 0)
+        self.assertEqual(self.state(1), {'seat': 1, 'parsed': True})
+
+    def test_final_malformed_then_fallback_reuses_number(self):
+        self.assertEqual(self.parse(1, 'malformed', None, '--final-attempt')[0], 3)
+        self.assertEqual(self.state(1), {'seat': 1, 'parsed': False})
+        code, result = self.parse(1, env(gaps='- blocking: synthetic fallback gap'), 'Fallback')
+        self.assertEqual((code, result['gaps']['ids']), (0, ['G1-1']))
+        self.assertEqual(self.state(1), {'seat': 1, 'parsed': True})
+
+    def test_bad_run(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cp.main(['seat-state', '--run', os.path.join(self.run, 'missing'), '--seat', '1']), 2)
+
+
 class Mint(Base):
     def test_mint_ids_tiers_and_open_ids(self):
         code, s = self.parse(1, env(gaps="- blocking: first\n  continued line\n- optional: second\n- third has no prefix"))

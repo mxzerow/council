@@ -6,8 +6,9 @@ Cursor cloud agents run on a fresh clone of a repository and do not see your per
 `.cursor/skills/<name>/SKILL.md`. This copies the files the Cursor skill needs into
 `<repo>/.cursor/skills/council/` so it can be committed.
 
-What is copied: SKILL.md, core.md, config.yaml, catalog.md, partitioning.md, reviewer-envelope.md,
-reviewer-prompt.md, LICENSE and the six scripts. Not copied: claude/, recipes/, tests, docs, run data,
+What is copied: SKILL.md, core.md, config.yaml, config.migrations.yaml, catalog.md,
+partitioning.md, reviewer-envelope.md, reviewer-prompt.md, LICENSE and the seven scripts.
+Not copied: claude/, recipes/, tests, docs, run data,
 config.local*. Run data lives in ~/.council/runs on whatever machine runs the skill.
 
 Standard library only.
@@ -29,11 +30,12 @@ import subprocess
 import sys
 
 FILES = [
-    "SKILL.md", "core.md", "config.yaml", "catalog.md", "partitioning.md",
+    "SKILL.md", "core.md", "config.yaml", "config.migrations.yaml", "catalog.md", "partitioning.md",
     "reviewer-envelope.md", "reviewer-prompt.md", "LICENSE",
     "scripts/council_parse.py", "scripts/council_resolve.py",
     "scripts/council_rewrite.py", "scripts/council_prompt.py",
     "scripts/council_gemini_api.py", "scripts/council_seat.py",
+    "scripts/council_roster.py",
 ]
 MANIFEST = ".council-install.json"
 DEST_REL = os.path.join(".cursor", "skills", "council")

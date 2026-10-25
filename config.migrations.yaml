@@ -1,0 +1,90 @@
+migrations:
+  - version: 2
+    date: 2026-10-25
+    title: Routing v2
+    changes:
+      - key: gemini_transport.cursor
+        kind: removed
+        meaning: Gemini is never routed through Cursor.
+        action: Delete cursor from the legacy Gemini transport list.
+        example: |
+          gemini_transport: [api, agy]
+      - key: gemini_transport
+        kind: renamed
+        meaning: The deprecated alias is replaced by origin-specific Gemini routes; the default is API then agy.
+        action: Replace the alias with routes for each origin you customise.
+        example: |
+          routes:
+            default:
+              gemini: [api, agy]
+            cursor:
+              gemini: [api, agy]
+      - key: routes.*.gemini
+        kind: changed
+        meaning: Cursor-first Gemini routes are removed in both harnesses.
+        action: Use api then agy for Gemini in both origins.
+        example: |
+          routes:
+            cursor:
+              gemini: [api, agy]
+      - key: routes.*.grok
+        kind: changed
+        meaning: The Grok CLI route is retired; Grok uses the Cursor CLI.
+        action: Set Grok routes to cursor_cli in both origins.
+        example: |
+          routes:
+            default:
+              grok: [cursor_cli]
+            cursor:
+              grok: [cursor_cli]
+      - key: routes, seats.transports, seats.fallback_for, gemini_api.unavailable_retry_wait_sec, gemini_api.unavailable_retries
+        kind: added
+        meaning: Origin routes, seat transport overrides, conditional fallback seats and API 503 retry settings are available.
+        action: Review routes and optional seat and retry settings; retain defaults unless needed.
+        example: |
+          routes:
+            default:
+              gemini: [api, agy]
+          gemini_api:
+            unavailable_retry_wait_sec: 20
+            unavailable_retries: 1
+      - key: seats.breadth
+        kind: changed
+        meaning: Argon uses api then agy; Flash is a conditional breadth fallback after both fail.
+        action: Review a local seats list against the new breadth pair.
+        example: |
+          seats:
+            - family: gemini
+              line: argon
+              role: breadth-auditor
+              label: Gemini Argon (breadth)
+              transports: [api, agy]
+            - family: gemini
+              line: flash
+              label: Gemini Flash (breadth fallback)
+              fallback_for: Gemini Argon (breadth)
+              transports: [api, agy]
+      - key: seats.rewriter
+        kind: changed
+        meaning: The rewriter chain is Flash then Sonnet; Argon is removed from rewriting.
+        action: Review the order of local rewriters.
+        example: |
+          seats:
+            - family: gemini
+              line: flash
+              role: rewriter
+            - family: claude
+              line: sonnet
+              role: rewriter
+      - key: seats
+        kind: changed
+        meaning: A local seats list replaces the whole shared list; local seats were previously ignored.
+        action: Remove local seats to inherit defaults, or provide the entire intended roster.
+        example: |
+          # Omit seats to inherit the shipped roster.
+      - key: based_on_config_version
+        kind: added
+        meaning: The local version stamp records which migrations have been reviewed.
+        action: After reviewing these changes, let Council stamp version 2.
+        example: |
+          based_on_config_version: 2

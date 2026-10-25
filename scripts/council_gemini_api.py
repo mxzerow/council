@@ -147,7 +147,7 @@ def validate_api(api):
 
 def read_config(root=ROOT):
     root = Path(root).resolve()
-    api, transports = dict(DEFAULTS), ['agy', 'cursor']
+    api, transports = dict(DEFAULTS), ['api', 'agy']
     for name in ('config.yaml', 'config.local.yaml'):
         parsed = parse_config(root / name)
         # Validate each file too: an override must not hide an invalid shared value.
@@ -156,9 +156,11 @@ def read_config(root=ROOT):
         api = candidate
         if 'gemini_transport' in parsed:
             transports = parsed['gemini_transport']
-            if (not transports or any(type(t) is not str or t not in ('agy', 'api', 'cursor') for t in transports)
+            if any(t in ('cursor', 'cursor_cli', 'task') for t in transports):
+                raise APIError("gemini_transport: Cursor transports are no longer valid; Gemini is never routed through Cursor (see config.migrations.yaml version 2)")
+            if (not transports or any(type(t) is not str or t not in ('agy', 'api') for t in transports)
                     or len(set(transports)) != len(transports)):
-                raise APIError('gemini_transport: expected non-empty, unique agy|api|cursor list')
+                raise APIError('gemini_transport: expected non-empty, unique api|agy list')
     api.setdefault('timeout_sec', 1200 if api['tier'] == 'free' else 300)
     path = Path(api.get('key_file', '~/.council/gemini.key')).expanduser()
     if not path.is_absolute():

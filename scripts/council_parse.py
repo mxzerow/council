@@ -16,6 +16,7 @@ Standard library only. Run with `python -I scripts/council_parse.py <command> ..
 Commands
   init        --run DIR
   open-ids    --run DIR                          open blocking IDs, comma separated
+  seat-state  --run DIR --seat N                 whether the seat has a parsed review (JSON)
   parse       --run DIR --seat N --label TEXT --reply FILE
               [--role ROLE] [--hold-artifact] [--final-attempt]
   apply       --run DIR --seat N                 commit a held seat (Revised + its status changes)
@@ -493,12 +494,19 @@ def cmd_parse(a):
     return 0
 
 
+def cmd_seat_state(a):
+    must_dir(a.run)
+    entry = seat_entry(load_state(a.run), a.seat)
+    print(json.dumps({"seat": a.seat, "parsed": entry is not None}))
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="council_parse")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("init"); s.add_argument("--run", required=True)
     s = sub.add_parser("open-ids"); s.add_argument("--run", required=True)
-    for name in ("apply", "reject"):
+    for name in ("apply", "reject", "seat-state"):
         s = sub.add_parser(name); s.add_argument("--run", required=True); s.add_argument("--seat", required=True, type=int)
     s = sub.add_parser("parse")
     s.add_argument("--run", required=True); s.add_argument("--seat", required=True, type=int)
@@ -511,7 +519,8 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)  # argparse exits 2 on bad usage (e.g. non-integer seat)
-    fn = {"init": cmd_init, "open-ids": cmd_open_ids, "apply": cmd_apply, "reject": cmd_reject, "parse": cmd_parse}[a.cmd]
+    fn = {"init": cmd_init, "open-ids": cmd_open_ids, "apply": cmd_apply, "reject": cmd_reject,
+          "parse": cmd_parse, "seat-state": cmd_seat_state}[a.cmd]
     try:
         return fn(a) or 0
     except (UsageError, OSError, ValueError) as e:

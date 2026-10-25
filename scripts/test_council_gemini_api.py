@@ -16,6 +16,12 @@ KEY = 'TESTKEY_aaaaaaaaaaaaaaaaaaaaaaaa'
 
 
 class API(unittest.TestCase):
+    def test_legacy_cursor_transports_point_to_migration(self):
+        for transport in ('cursor', 'cursor_cli', 'task'):
+            (self.root / 'config.yaml').write_text(f'gemini_transport: [{transport}]\n', encoding='utf-8')
+            with self.subTest(transport=transport), self.assertRaisesRegex(cga.APIError, 'config.migrations.yaml version 2'):
+                cga.read_config(self.root)
+
     @classmethod
     def setUpClass(cls):
         cls.requests = []
@@ -238,11 +244,13 @@ class API(unittest.TestCase):
                 code, result, _ = self.cli('config')
                 self.assertEqual(code, 2)
                 self.assertIn(key, result['detail'])
-        for value in ('[]', '[agy, agy]', '[foo]', 'agy', '[agy, cursor', '[agy, true]'):
+        for value in ('[]', '[agy, agy]', '[foo]', 'agy', '[agy, cursor', '[agy, true]', '[cursor]', '[api, cursor, agy]'):
             (self.root / 'config.yaml').write_text('gemini_transport: ' + value)
             code, result, _ = self.cli('config')
             self.assertEqual(code, 2, value)
             self.assertIn('gemini_transport', result['detail'])
+            if value.endswith(']') and 'cursor' in value:
+                self.assertIn('config.migrations.yaml version 2', result['detail'])
 
     def test_config_merge_lists_quotes_and_timeouts(self):
         (self.root / 'config.yaml').write_text('seats:\n  - family: gemini\nother: ignored\ngemini_transport:\n  - agy\n  - "api" # comment\ngemini_api:\n  tier: paid\n  enabled: true\n')
@@ -257,6 +265,10 @@ class API(unittest.TestCase):
         self.assertEqual(self.cli('config')[1]['gemini_api']['timeout_sec'], 1200)
         self.config('tier: paid\ntimeout_sec: 60', local=True)
         self.assertEqual(self.cli('config')[1]['gemini_api']['timeout_sec'], 60)
+        (self.root / 'config.local.yaml').write_text('gemini_transport: [api, cursor, agy]\n')
+        code, result, _ = self.cli('config')
+        self.assertEqual(code, 2)
+        self.assertIn('config.migrations.yaml version 2', result['detail'])
 
     def test_preflight_and_paginated_models(self):
         self.assertEqual(self.cli('preflight')[1]['status'], 'ok')
@@ -338,7 +350,7 @@ class API(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         config = json.loads(result.stdout)
-        self.assertEqual(config['gemini_transport'], ['agy', 'cursor'])
+        self.assertEqual(config['gemini_transport'], ['api', 'agy'])
         self.assertFalse(config['gemini_api']['enabled'])
         self.assertEqual(config['gemini_api']['timeout_sec'], 1200)
         result = subprocess.run([sys.executable, '-I', str(script), 'call', '--root', str(shipped),

@@ -13,6 +13,30 @@ PR (not backfilled later). One entry per PR, dated by merge date, using
 `Added` / `Changed` / `Fixed` / `Removed` sections as needed. Skip trivial
 wording fixes that don't change behavior.
 
+## 2026-10-25 - Routing v2
+
+### Breaking
+
+- Review [config.migrations.yaml](config.migrations.yaml), version 2, before upgrading an existing local config. Gemini through Cursor/Task is removed everywhere; Grok uses `cursor_cli`, and a local `seats:` now replaces the entire shared list. Legacy `gemini_transport` accepts only api/agy and is deprecated in favor of per-origin routes.
+- Put ALL customizations in `config.local.yaml`, never `config.yaml`. Updates never overwrite or upload local config. Start shows pending migration notes and asks approval before changing anything or stamping `based_on_config_version`.
+
+### Added
+
+- Per-origin routes, seat `transports` overrides and conditional `fallback_for` reviewers; `council_roster.py` load/validate/check/migrations/stamp/write-local and parser `seat-state`.
+- `config_version` / `based_on_config_version` and versioned migration notes; local writer validates both origins, preserves API settings verbatim, backs up the previous local file and saves atomically.
+- API 503 same-model retry (20 s plus jitter, once by default), configurable retry limits and computed outer timeout; 429 advances without waiting.
+- Configure wizard in both harnesses with validation, approval and local-only persistence; api-only, claude-code-full and cursor-originated presets (not installed into project copies).
+
+### Changed
+
+- Gemini defaults to api then agy in both origins. Argon works out of the box with agy; the API is optional and disabled by default. Free-tier privacy acknowledgment remains required; never send PHI or confidential text through the free tier.
+- Default roster: Argon breadth, conditional Flash breadth fallback after all Argon routes fail, GPT Sol, then Flash/Sonnet rewriters. A fallback reuses its primary review slot and gap IDs.
+- Grok runs through the Cursor CLI; GPT/Claude use the allowed transports for the run origin. Installer includes the roster script and migration notes, never local config, presets, recipes or keys.
+
+### Removed
+
+- Gemini via Cursor, the separate Grok CLI route and `recipes/grok.md`.
+
 ## 2026-10-25 — Default rewriter chain is Flash, then Sonnet
 
 ### Changed

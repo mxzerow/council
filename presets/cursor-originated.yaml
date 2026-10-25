@@ -1,0 +1,47 @@
+# Starting roster for /council configure; API settings remain local.
+based_on_config_version: 2
+routes:
+  default:
+    gemini: [api, agy]
+    gpt: [codex]
+    grok: [cursor_cli]
+    claude: [agent]
+    composer: []
+  cursor:
+    gemini: [api, agy]
+    gpt: [task]
+    grok: [cursor_cli]
+    claude: [task]
+    composer: [task]
+
+seats:
+  - family: gemini
+    line: argon
+    effort: medium
+    role: breadth-auditor
+    label: Gemini Argon (breadth)
+    transports: [api, agy]
+  - family: gemini
+    line: flash
+    effort: medium
+    label: Gemini Flash (breadth fallback)
+    fallback_for: Gemini Argon (breadth)
+    transports: [api, agy]
+  - family: gpt
+    line: sol
+    effort: medium
+    label: GPT Sol
+  - family: claude
+    line: opus
+    effort: medium
+    label: Claude Opus
+  - family: gemini
+    line: flash
+    effort: low
+    role: rewriter
+    label: Gemini Flash (rewrite, 1st)
+  - family: claude
+    line: sonnet
+    effort: medium
+    role: rewriter
+    label: Claude Sonnet (rewrite, 2nd)

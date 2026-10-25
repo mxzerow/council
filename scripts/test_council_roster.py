@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 try:
     import council_roster as cr
@@ -205,6 +206,132 @@ class Versions(unittest.TestCase):
             code = cr.main([args[0], '--root', str(self.root), *args[1:]])
         self.assertEqual(len(out.getvalue().splitlines()), 1)
         return code, json.loads(out.getvalue())
+
+    def candidate(self, text):
+        path = self.root / 'candidate.yaml'
+        path.write_text(text, encoding='utf-8')
+        return str(path)
+
+    def test_write_local_preserves_api_bytes_and_backup(self):
+        local = self.root / 'config.local.yaml'
+        api = b'gemini_api:\r\n  enabled: false # synthetic\r\n  tier: free\r\n'
+        original = (b'\xef\xbb\xbf# keep\r\nbased_on_config_version: 1 # reviewed\r\n' + api
+                    + b'\r\nseats:\r\n- family: gemini\r\n  line: argon\r\n'
+                    + b'# keep this comment\r\nruns_dir: synthetic-runs\r\n')
+        local.write_bytes(original)
+        candidate = self.candidate('seats:\n- family: gpt\n  line: sol\n')
+        code, result = self.cli('write-local', '--candidate', candidate)
+        self.assertEqual(code, 0, result)
+        written = local.read_bytes()
+        self.assertIn(api, written)
+        self.assertTrue(written.startswith(b'\xef\xbb\xbf# keep\r\n'))
+        self.assertIn(b'based_on_config_version: 2 # reviewed\r\n', written)
+        self.assertIn(b'# keep this comment\r\nruns_dir: synthetic-runs\r\n', written)
+        self.assertNotIn(b'\n', written.replace(b'\r\n', b''))
+        self.assertEqual((self.root / 'config.prev.local.yaml').read_bytes(), original)
+        for origin in cr.ROUTES:
+            self.assertEqual(cr.build_roster(SHARED, written.decode('utf-8-sig'), origin)['seats'][0]['line'], 'sol')
+
+    def test_write_local_creates_and_appends_allowed_sections(self):
+        candidate = self.candidate('based_on_config_version: 2\nshow_exchange: always\nmax_reviewers: 3\n'
+                                   'routes:\n  default:\n    gemini: [agy]\n')
+        code, result = self.cli('write-local', '--candidate', candidate)
+        self.assertEqual(code, 0, result)
+        local = self.root / 'config.local.yaml'
+        self.assertIn('based_on_config_version: 2', local.read_text())
+        self.assertFalse((self.root / 'config.prev.local.yaml').exists())
+        local.write_bytes(b'runs_dir: synthetic-runs')
+        code, result = self.cli('write-local', '--candidate', candidate)
+        self.assertEqual(code, 0, result)
+        self.assertTrue(local.read_bytes().startswith(b'runs_dir: synthetic-runs\n'))
+
+    def test_write_local_refuses_candidates_without_writing_or_leaking(self):
+        local = self.root / 'config.local.yaml'
+        original = b'based_on_config_version: 2\ngemini_api:\n  enabled: false\n'
+        local.write_bytes(original)
+        backup = self.root / 'config.prev.local.yaml'
+        backup.write_bytes(b'previous synthetic backup')
+        for text in ['gemini_api:\n  enabled: true\n', 'key_file: SYNTHETIC_SECRET_abcdef\n',
+                     'gemini_transport: [api]\n', 'unknown: SYNTHETIC_SECRET_abcdef\n',
+                     'seats:\n- family: gemini\n  line: flash\n  transports: [task]\n',
+                     'routes:\n  cursor:\n    gpt: [codex]\n', 'show_exchange: invalid\n',
+                     'show_exchange: []\n', 'max_reviewers: 0\n', 'seats : []\n',
+                     '  gemini_api:\n    enabled: true\n',
+                     'seats: []\nseats: []\n', 'based_on_config_version: 3\n']:
+            with self.subTest(text=text):
+                code, result = self.cli('write-local', '--candidate', self.candidate(text))
+                self.assertEqual(code, 2, result)
+                self.assertNotIn('SYNTHETIC_SECRET_abcdef', json.dumps(result))
+                self.assertEqual(local.read_bytes(), original)
+                self.assertEqual(backup.read_bytes(), b'previous synthetic backup')
+        # A valid candidate must also be refused when the retained local routes
+        # make the merged configuration invalid in the other origin.
+        original = b'routes:\n  cursor:\n    gpt: [codex]\n'
+        local.write_bytes(original)
+        candidate = self.candidate('seats:\n- family: gpt\n  line: sol\n')
+        code, result = self.cli('write-local', '--candidate', candidate)
+        self.assertEqual(code, 2, result)
+        self.assertEqual(local.read_bytes(), original)
+        self.assertEqual(backup.read_bytes(), b'previous synthetic backup')
+
+    def test_write_local_replaces_routes_and_scalars_and_preserves_absent_sections(self):
+        local = self.root / 'config.local.yaml'
+        original = ('max_reviewers: 1\nshow_exchange: never\nroutes:\n  default:\n    gemini: [agy]\n'
+                    'seats:\n- family: gpt\n  line: sol\n')
+        local.write_text(original, encoding='utf-8')
+        candidate = self.candidate('max_reviewers: 4\nshow_exchange: ask\nroutes:\n  cursor:\n    grok: []\n')
+        code, result = self.cli('write-local', '--candidate', candidate)
+        self.assertEqual(code, 0, result)
+        written = local.read_text()
+        self.assertIn('seats:\n- family: gpt\n  line: sol\n', written)
+        parsed = cr.parse_config(written)
+        self.assertEqual(parsed['max_reviewers'], 4)
+        self.assertEqual(parsed['routes'], {'cursor': {'grok': []}})
+        self.assertEqual(cr.parse_subset(written, {'show_exchange'}), {'show_exchange': 'ask'})
+
+    def test_write_local_atomic_failure_keeps_original(self):
+        local = self.root / 'config.local.yaml'
+        original = b'based_on_config_version: 2\n'
+        local.write_bytes(original)
+        candidate = self.candidate('max_reviewers: 3\n')
+        replace = cr.os.replace
+        def fail_local(source, target):
+            if target == local:
+                raise OSError('synthetic write failure')
+            return replace(source, target)
+        with patch.object(cr.os, 'replace', side_effect=fail_local):
+            code, result = self.cli('write-local', '--candidate', candidate)
+        self.assertEqual(code, 2, result)
+        self.assertEqual(local.read_bytes(), original)
+        self.assertEqual((self.root / 'config.prev.local.yaml').read_bytes(), original)
+        self.assertEqual(list(self.root.glob('.council-stamp-*')), [])
+
+    def test_write_local_isolated_entrypoint(self):
+        candidate = self.candidate('max_reviewers: 3\n')
+        process = subprocess.run([sys.executable, '-I', str(ROOT / 'scripts/council_roster.py'),
+                                  'write-local', '--root', str(self.root), '--candidate', candidate],
+                                 capture_output=True, text=True, timeout=20)
+        self.assertEqual(process.returncode, 0, process.stderr + process.stdout)
+        self.assertEqual(len(process.stdout.splitlines()), 1)
+        self.assertEqual(json.loads(process.stdout)['based_on'], 2)
+
+    def test_presets_validate_both_origins_and_expected_rosters(self):
+        shared = (ROOT / 'config.yaml').read_text(encoding='utf-8')
+        paths = sorted((ROOT / 'presets').glob('*.yaml'))
+        self.assertEqual([p.name for p in paths], ['api-only.yaml', 'claude-code-full.yaml', 'cursor-originated.yaml'])
+        for path in paths:
+            text = path.read_text(encoding='utf-8')
+            self.assertEqual(cr.parse_config(text)['based_on_config_version'], 2)
+            for origin in cr.ROUTES:
+                roster = cr.build_roster(shared, text, origin)
+                if path.stem == 'api-only':
+                    self.assertEqual(roster['routes']['gemini'], ['api'])
+                    self.assertTrue(all(s['transports'] == ['api'] for s in roster['seats'] if s['family'] == 'gemini'))
+                else:
+                    family = 'grok' if path.stem == 'claude-code-full' else 'claude'
+                    self.assertEqual([s['family'] for s in roster['seats']], ['gemini', 'gemini', 'gpt', family, 'gemini', 'claude'])
+                code, result = self.cli('write-local', '--candidate', str(path))
+                self.assertEqual(code, 0, result)
 
     def test_version_states(self):
         for local, based, count in [(None, None, 0), ('based_on_config_version: 2\n', 2, 0), ('', 1, 1)]:

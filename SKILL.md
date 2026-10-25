@@ -69,7 +69,7 @@ Load the roster and routes through council_roster.py at Start. Other settings me
 3. Resolve models first ([Model resolution](#model-resolution-cursor)), then show the roster (count, labels, order) in one short list, flagging every seat that will be skipped (no matching model on any available transport, same-model skip).
 4. Confirm unless the user already decided:
    - `/council proceed` or `proceed` → run
-   - `/council configure` or `configure` / `reconfigure` → [Reconfigure](#reconfigure)
+   - `/council configure` or `configure` / `reconfigure` → [Configure](#configure)
    - One-shot override in the same message (`this time only: Grok then Claude`) → use that roster for this run; carry no transports/fallback_for, use the route table, and do not persist without approval
    - A full request after `/council` (topic included) → treat as **Proceed**
 
@@ -158,16 +158,19 @@ Gemini resolves with api/agy only; Grok resolves with `--source cursor` from its
 
 Shared: [core.md](core.md#return). Cursor exchange handling: if exchange was requested, write `<run>/exchange.md` with the transcript and set `<runs_dir>/last-exchange.md` to a single line with its absolute path (or run id). Secret-hygiene applies to both.
 
-## Reconfigure
+## Configure
 
-Read [catalog.md](catalog.md). Then:
+`/council configure`, `configure` and `reconfigure` open this wizard. Put ALL changes in `config.local.yaml`; never edit `config.yaml` or `CHANGELOG.md`. Updates never overwrite or upload local config. When shipped `config_version` exceeds local `based_on_config_version` (missing means 1), show upgrade notes at Start and ask before editing or stamping; see Start's Apply / Mark as reviewed / Not now choices.
 
-1. Ask how many seats (minimum 1; warn above `max_reviewers`).
-2. For each seat, in order, ask `family`, `line`, `effort` and an optional `role`. Default the first Gemini seat to `role: breadth-auditor` unless the user opts out.
-3. Ask whether to persist and the `show_exchange` default (`ask` / `always` / `never`).
-4. If they persist, write the `seats:` list of [config.yaml](config.yaml); preserve any existing `role: breadth-auditor` unless the user explicitly removes that seat or role. One-shot overrides do not persist unless they say to save.
-5. If persisted, add an entry to [CHANGELOG.md](CHANGELOG.md) (dated, `Changed`/`Added`/`Removed` as fits). Skip only when nothing observable changed.
-6. Run the cascade unless they chose **Reconfigure only**.
+Explain first: Gemini is NEVER routed through Cursor or Task, in any run. Grok uses the Cursor CLI (`cursor_cli`, runner/source `cursor`). Argon works out of the box for anyone with agy; API access is optional. The seeded roster is Argon breadth on api then agy, conditional Flash breadth fallback only after all Argon attempts fail, GPT Sol, then the Flash/Sonnet rewriter chain. With the API disabled its preflight logs `api-refused` once and Argon uses agy. **Free-tier API prompts/replies may be used for product improvement and human review; never send PHI or confidential text.** The wizard never enables the API or changes its acknowledgment.
+
+1. Ask for a start point: shipped default, a preset from `<shared>/presets/*.yaml` when available, or the current local roster (from `load`). Presets: `api-only`, `claude-code-full` (adds Grok), `cursor-originated` (adds Claude Opus); project installs do not include them, so offer shipped/current there. API-only requires separately configured API access. A local `seats:` replaces the entire shared list.
+2. Ask for the number of primary review seats (minimum 1; warn above `max_reviewers`, offer to raise it or reduce seats). Fallbacks and rewriters do not add review slots. For each seat ask family, line, effort, role and label; default the first Gemini reviewer to breadth-auditor. Preserve an existing breadth role unless explicitly removed. Show `python -I <shared>/scripts/council_resolve.py list --source <source> --family <family>` for its first transport when reachable (api/agy/codex/cursor; Task uses catalog.md; Agent has no CLI catalog). Resolve versions within the chosen line only.
+3. Show where each seat is called from for this origin (`cursor`), then offer keep / single transport / custom order. Accept only the core.md Routing matrix: Gemini api/agy in both; Grok cursor_cli in both; GPT codex in default, task in cursor; Claude agent in default, task in cursor; Composer none in default, task in cursor. Configure `routes` per origin/family or seat `transports` as an explicit replacement; show filtering and every no-transport skip in the other origin. Gemini never uses Cursor/Task, even as backup.
+4. For each reviewer ask whether to add a fallback. Give primary and fallback unique labels; place the fallback immediately after its primary, set `fallback_for` to the exact primary label and inherit its role. It runs only if `seat-state` is still unparsed after every primary transport, retry and final attempt. Ask for rewriter chain order separately; rewriters have no `fallback_for`.
+5. Ask `show_exchange` (ask/always/never) and whether to save or use only this run. A one-run override follows core.md Runtime override and carries neither transports nor fallback_for. For saving, write `<runs_dir>/configure-candidate.yaml` containing only selected `seats`, `routes`, `max_reviewers`, `show_exchange` (optional `based_on_config_version` metadata). No gemini_api, gemini_transport, key_file, credentials or unrelated settings; retain API settings in the existing local file.
+6. Run `python -I <shared>/scripts/council_roster.py validate --root <shared> --local <runs_dir>/configure-candidate.yaml`. Show its resulting rosters for BOTH default and cursor origins, including fallback slots, rewriter order, truncation and skipped transports. Explain that omitted candidate sections keep existing local values when saved; include current effective values for any of these four sections needed for an accurate preview. Fix validation errors before seeking approval.
+7. Show the exact proposed change and ask approval. Only on approval run `python -I <shared>/scripts/council_roster.py write-local --root <shared> --candidate <runs_dir>/configure-candidate.yaml`. It validates the merged local text in both origins, preserves unrelated lines (including gemini_api) verbatim, backs up the old file as `config.prev.local.yaml`, writes atomically and stamps the shipped config version. On failure show its safe detail and stop; on success reload and show the saved roster. Never write the shipped config or changelog. Run the cascade unless the user chose configure-only.
 
 ## Examples
 
@@ -187,10 +190,10 @@ Draft seat 0 → save `seat-0-*.md` → reviewers report gaps → integration pa
 
 Pack the prior plan as `artifact.md`; skip the seat-0 rewrite; cascade reviewers.
 
-**Reconfigure**
+**Configure**
 
 ```
 /council configure
 ```
 
-Example: user picks 3 seats (Gemini Argon, Claude Opus, GPT Sol), persists, `show_exchange: ask`. Write the `seats:` list (keep `max_reviewers` and the other keys). Then run the cascade unless they chose Reconfigure only.
+Example: start from cursor-originated, keep Argon with its conditional Flash fallback, GPT Sol and Claude Opus, and choose `show_exchange: ask`. Validate the candidate, preview both origins, then save with `write-local` only after approval. Run unless the user chose configure-only.

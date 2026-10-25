@@ -4,7 +4,7 @@ Shared cascade logic for both harnesses. Not a skill: no front matter, never inv
 
 Council is a **workflow**, not a harness mode. You are the orchestrator. The lineup: a draft (seat 0), reviewers who **report gaps only**, then **one integration pass** that resolves every gap and writes the revision ([Stages](#stages)). No parallel first answers, no anonymized peer review, no chairman synthesis.
 
-A harness defines: the shared root, Start/confirm, **DISPATCH(seat)** (how one seat is called and its failure classes; the only intentionally different logic), per-transport preflight (a failure skips only that transport), the orchestrator's family, and Reconfigure.
+A harness defines: the shared root, Start/confirm, **DISPATCH(seat)** (how one seat is called and its failure classes; the only intentionally different logic), per-transport preflight (a failure skips only that transport), the orchestrator's family, and [Configure](SKILL.md#configure) (Claude Code: [Configure](claude/SKILL.md#configure)); save only through `council_roster.py write-local` to `config.local.yaml` after approval.
 
 ## Roster (`seats:`)
 
@@ -113,7 +113,7 @@ After a dispatch: on success `mark-good --key <key> --slug <slug> --state <state
 
 ## Runtime override (this run only)
 
-The user may name a different roster in the `/council` message: `this time only: Grok then Gemini`, `models: gemini argon, gpt sol`, or exact slugs. Resolve each name as family + line through the resolver (or as an exact slug, which is a `pin`). The override **replaces** the roster in the order given unless the request is clearly additive ("also run Grok"). Same-model skip still applies to it. Overrides never carry `transports`/`fallback_for`; use the routes and drop any fallback whose target is absent. Never write `config.yaml` for an override; persist only through Reconfigure when the user says to save. A name that cannot be resolved is left out and reported, never guessed.
+The user may name a different roster in the `/council` message: `this time only: Grok then Gemini`, `models: gemini argon, gpt sol`, or exact slugs. Resolve each name as family + line through the resolver (or as an exact slug, which is a `pin`). The override **replaces** the roster in the order given unless the request is clearly additive ("also run Grok"). Same-model skip still applies to it. Overrides never carry `transports`/`fallback_for`; use the routes and drop any fallback whose target is absent. Never write `config.yaml` for an override; persist only through Configure when the user says to save. A name that cannot be resolved is left out and reported, never guessed.
 
 ## When not to use
 

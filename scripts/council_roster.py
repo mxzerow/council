@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate and load Council rosters. Python 3.10+, standard library only.
 
-Run with python -I scripts/council_roster.py load|validate|check|migrations|stamp.
+Run with python -I scripts/council_roster.py load|validate|check|migrations|stamp|write-local.
 The pure core accepts text only; it never reads credentials or invokes transports.
 """
 import argparse
@@ -390,6 +390,70 @@ def atomic_write(path, data):
             temporary.unlink()
 
 
+def sections(text, candidate=False):
+    """Locate top-level sections without interpreting unrelated local values."""
+    lines = text.splitlines(keepends=True)
+    headers = []
+    allowed = {'seats', 'routes', 'max_reviewers', 'show_exchange', 'based_on_config_version'}
+    seen = set()
+    for i, line in enumerate(lines):
+        clean = uncomment(line.rstrip('\r\n'))
+        if candidate and clean.strip() and not headers and clean.startswith((' ', '\t', '- ')):
+            raise APIError('candidate: expected a top-level key')
+        if not clean.strip() or clean.startswith((' ', '\t', '- ')):
+            continue
+        match = re.match(r'^([A-Za-z_][A-Za-z_0-9]*):', clean)
+        if not match:
+            if candidate:
+                raise APIError('candidate: malformed top-level key')
+            continue
+        key = match.group(1)
+        if candidate:
+            if key not in allowed:
+                raise APIError('candidate: only seats, routes, max_reviewers, show_exchange and the version stamp are allowed')
+            if key in seen:
+                raise APIError(f'{key}: duplicate candidate key')
+        seen.add(key)
+        headers.append((key, i))
+    result = []
+    for index, (key, start) in enumerate(headers):
+        end = headers[index + 1][1] if index + 1 < len(headers) else len(lines)
+        # Preserve trailing comments and whitespace independently of the replaced section.
+        while end > start + 1 and not uncomment(lines[end - 1].rstrip('\r\n')).strip():
+            end -= 1
+        result.append((key, start, end))
+    return lines, result
+
+
+def merge_local(shared, original, candidate):
+    """Merge a restricted candidate, preserving all unrelated local bytes."""
+    candidate = candidate.lstrip('\ufeff')
+    candidate_lines, candidate_sections = sections(candidate, candidate=True)
+    parsed = parse_subset(candidate, {'seats', 'routes', 'max_reviewers', 'show_exchange', 'based_on_config_version'})
+    version, _ = version_info(shared, candidate)
+    if 'show_exchange' in parsed and parsed['show_exchange'] not in ('ask', 'always', 'never'):
+        raise APIError('show_exchange: expected ask, always or never')
+    local = original.decode('utf-8-sig')
+    version_info(shared, local if original else None)
+    newline = '\r\n' if '\r\n' in local else '\n'
+    replacements = {key: ''.join(candidate_lines[start:end]).replace('\r\n', '\n').replace('\n', newline)
+                    for key, start, end in candidate_sections if key != 'based_on_config_version'}
+    lines, old_sections = sections(local)
+    for key, start, end in reversed(old_sections):
+        if key in replacements:
+            lines[start:end] = [replacements.pop(key).rstrip('\r\n') + newline]
+    merged = ''.join(lines)
+    for replacement in replacements.values():
+        merged += (newline if merged and not merged.endswith('\n') else '') + replacement.rstrip('\r\n') + newline
+    bom = b'\xef\xbb\xbf' if original.startswith(b'\xef\xbb\xbf') else b''
+    data = stamp_bytes(bom + merged.encode('utf-8'), version)
+    text = data.decode('utf-8-sig')
+    for origin in ROUTES:
+        build_roster(shared, text, origin)
+    version_info(shared, text)
+    return data, version
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         raise APIError('arguments: invalid command or option')
@@ -400,7 +464,7 @@ def main(argv=None):
     try:
         parser = Parser(prog='council_roster')
         sub = parser.add_subparsers(dest='cmd', required=True)
-        for command in ('load', 'validate', 'check', 'migrations', 'stamp'):
+        for command in ('load', 'validate', 'check', 'migrations', 'stamp', 'write-local'):
             p = sub.add_parser(command)
             p.add_argument('--root', type=Path, default=ROOT)
             if command == 'load':
@@ -411,6 +475,8 @@ def main(argv=None):
                 p.add_argument('--since', type=int)
             elif command == 'stamp':
                 p.add_argument('--version', type=int)
+            elif command == 'write-local':
+                p.add_argument('--candidate', required=True, type=Path)
         args = parser.parse_args(argv)
         shared = (args.root / 'config.yaml').read_text(encoding='utf-8-sig')
         local_path = args.local if args.cmd == 'validate' and args.local else args.root / 'config.local.yaml'
@@ -418,7 +484,16 @@ def main(argv=None):
         if args.cmd in ('load', 'validate'):
             parse_subset(shared, KEYS, path=args.root / 'config.yaml')
             parse_subset(local, KEYS, path=local_path)
-        if args.cmd == 'validate':
+        if args.cmd == 'write-local':
+            original = local_path.read_bytes() if local is not None else b''
+            candidate = args.candidate.read_text(encoding='utf-8-sig')
+            data, version = merge_local(shared, original, candidate)
+            if local is not None:
+                atomic_write(args.root / 'config.prev.local.yaml', original)
+            atomic_write(local_path, data)
+            result = dict(status='ok', config_version=version, based_on=version)
+            code = 0
+        elif args.cmd == 'validate':
             if args.local and local is None:
                 raise APIError('local: candidate file is missing')
             result = {'status': 'ok', 'rosters': {origin: build_roster(shared, local, origin) for origin in ROUTES}}

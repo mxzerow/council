@@ -5,7 +5,7 @@ python -I <shared>/scripts/council_seat.py preflight --transport api --root <sha
 python -I <shared>/scripts/council_seat.py run --transport api --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <prompt-file> --reply <reply-file>
 ```
 
-This is a direct REST call using your own API key, quota and billing, independent of `agy` and Cursor. Python 3.10+; standard library only; always run with `python -I`. Enable it and choose its position in `gemini_transport` through `config.local.yaml`. Defaults keep it disabled. Key-file setup and privacy comparison: [README, Choosing how Gemini is called](../README.md#choosing-how-gemini-is-called).
+This is a direct REST call using your own API key, quota and billing, independent of `agy` and Cursor. Python 3.10+; standard library only; always run with `python -I`. Enable it and choose its position in `routes.<origin>.gemini` through `config.local.yaml`. Defaults keep it disabled. Key-file setup and privacy comparison: [README, Choosing how Gemini is called](../README.md#choosing-how-gemini-is-called).
 
 ## Preflight and config
 
@@ -15,7 +15,7 @@ python -I "$shared\scripts\council_gemini_api.py" preflight --root $shared
 python -I "$shared\scripts\council_gemini_api.py" models --root $shared
 ```
 
-`config` returns effective config JSON, resolved timeout, key source (`env|file|missing`) and key-file path, never the key. Local overrides merge per key. Invalid settings name the offending key and exit 2. `preflight` validates enabled, privacy acknowledgment and key, then GETs `/models?pageSize=1`; no generation. Failure skips only this transport (`cli-preflight-api`, plus `api-refused` for configuration refusal). `models` pages through the live catalog, retains `generateContent` entries and drops token variants `latest`, `preview`, `exp`, `experimental`. The resolver additionally excludes unintended `lite`, `image`, `tts`, `customtools` variants for a Flash seat.
+`config` returns effective config JSON, resolved timeout and `outer_timeout_sec`, key source (`env|file|missing`) and key-file path, never the key. Local overrides merge per key. Invalid settings name the offending key and exit 2. `preflight` validates enabled, privacy acknowledgment and key, then GETs `/models?pageSize=1`; no generation. Failure skips only this transport (the runner logs `api-refused` for configuration refusal, otherwise `cli-preflight-api`). `models` pages through the live catalog, retains `generateContent` entries and drops token variants `latest`, `preview`, `exp`, `experimental`. The resolver additionally excludes unintended `lite`, `image`, `tts`, `customtools` variants for a Flash seat.
 
 The key is loaded from `COUNCIL_GEMINI_API_KEY`, then the effective `gemini_api.key_file`, then `~/.council/gemini.key`. There is no `--key` flag. Key files accept UTF-8 (with or without BOM) and BOM-marked UTF-16 LE/BE, contain one key line, and must match letters/digits/underscore/hyphen/dot (at least 20 characters). POSIX files must have no group/other permissions (`chmod 600`). Windows ACLs are documented in the README; the script never checks or changes them. The endpoint is fixed to `https://generativelanguage.googleapis.com/v1beta`; no endpoint flag or environment override is accepted, and redirects are refused. The key goes only in `x-goog-api-key`, never the URL. Errors are redacted and limited to 300 characters.
 
@@ -23,7 +23,7 @@ The key is loaded from `COUNCIL_GEMINI_API_KEY`, then the effective `gemini_api.
 
 Resolve with `council_resolve.py resolve --family gemini --line flash --source api --state <runs_dir>/_resolved.json`. Build reviews with `council_prompt.py build --run <run> --seat <n> --label <label> --family gemini --mode inline`, supplying role and total. Use council_seat.py run above as the dispatch entry point; it delegates to council_gemini_api.py and keeps stdout/stderr/meta itself. Never put prompt text in argv.
 
-Read only the runner's one-line summary and parse its reply file on success. The API summary (status/class, HTTP, usage, finish reason, seconds, tier, maximum output, detail) is retained in argv-meta. Reply files stay untouched on failure. Surface free_tier_warning once per run. On success mark-good the slug.
+Read only the runner's one-line summary and parse its reply file on success. The API summary (status/class, HTTP, usage, finish reason, seconds, tier, maximum output, detail, unavailable_retries_used) is retained in argv-meta. Reply files stay untouched on failure. Surface free_tier_warning once per run. On success mark-good the slug.
 
 The API uses `gemini_api.thinking_level` (default `high`), independent of the seat's effort. Do not forward the seat effort. An explicit API `--effort low|medium|high` overrides the config; `minimal` is invalid. It sends `generationConfig.thinkingConfig.thinkingLevel`; `includeThoughts` is not set. Reviews default to 32768 output tokens; rewrites to 65536. `--max-output` explicitly overrides with a positive integer, clamped to `outputTokenLimit` from a model GET before generation; config caps must be 1024..65536. No token optimisation or `service_tier` is sent. `service_tier` is a possible future option once verified for this endpoint.
 
@@ -37,7 +37,7 @@ Free refuses unless `free_tier_ack: true`. A free invocation prints exactly one 
 council: Gemini API free tier - Google may use prompts and replies to improve its products and humans may review them; do not send PHI or confidential text.
 ```
 
-Capture this stderr and show the reminder once per council run. Paid has no reminder. In Claude Code the shell foreground limit is 600 s: if timeout + 120 > 540 s, use `run_in_background: true` and resume on the completion notification; never poll or sleep. Otherwise set foreground tool timeout to `(timeout + 120) * 1000` ms. The script enforces the socket timeout. The runner uses the API timeout plus 120 seconds as its outer hard limit; include that allowance in the shell tool budget.
+Capture this stderr and show the reminder once per council run. Paid has no reminder. In Claude Code the shell foreground limit is 600 s: if `outer_timeout_sec` > 540 s, use `run_in_background: true` and resume on the completion notification; never poll or sleep. Otherwise set foreground tool timeout to `outer_timeout_sec * 1000` ms. The script enforces the socket timeout. The runner uses `timeout_sec * (1 + unavailable_retries) + unavailable_retries * (unavailable_retry_wait_sec + 2) + 120` as its outer hard limit (2542 s for free defaults); include it in the shell tool budget.
 
 ## Failures and bounded fallback
 
@@ -47,7 +47,7 @@ Capture this stderr and show the reminder once per council run. Paid has no remi
 | `empty`, including blocked/no candidates or thought-only/MAX_TOKENS without text | Retry once, same model; then next transport |
 | `model-rejected`: 404 GET/POST or 400 model unsupported/not found | `mark-rejected --slug <slug> --state <state>` (7 days); resolve next-lower same line |
 | `quota`: 429 | Resolve with repeatable `--exclude <slug>` for every slug excluded this run; no persistent cooldown |
-| `unavailable`: 503 | `mark-rejected --slug <slug> --state <state> --days 1 --reason unavailable`; resolve next-lower same line |
+| `unavailable`: 503 | `call` retries the same request/model after `unavailable_retry_wait_sec` (default 20) + uniform 0..2 s jitter, up to `unavailable_retries` (default 1); applies to model GET and generation, not preflight/models. If still unavailable: `mark-rejected --slug <slug> --state <state> --days 1 --reason unavailable`; resolve next-lower same line |
 | `network`: 500/502 | Retry once on same model; then next transport |
 | `network`: URL/DNS/TLS/reset | Next transport |
 | `timeout`: 504 or socket timeout | Next transport; never a lower model |
@@ -55,7 +55,7 @@ Capture this stderr and show the reminder once per council run. Paid has no remi
 | `other`: other 400 or unclassified failure | Log and use next transport |
 | `config`: disabled, missing ack/key, bad key/perms, usage/IO | `api-refused: <reason>`; next transport |
 
-The runner logs each failed step in `failures.md` with `api-<class>` (configuration refusals use `api-refused`); do not duplicate it. At most `max_model_steps` step-downs (default 2), same family and line only. Pins never downgrade. Two dispatches per (seat, transport, model), total API generation calls per seat <= `2 * (1 + max_model_steps)` (including chunks/retries); exhausting this budget advances to the next transport.
+The runner logs each failed step in `failures.md` with `api-<class>` (configuration refusals use `api-refused`); do not duplicate it. At most `max_model_steps` step-downs (default 2), same family and line only. Pins never downgrade. Two dispatches per (seat, transport, model), total API generation dispatches per seat <= `2 * (1 + max_model_steps)` (including chunks/orchestrator retries; internal 503 retries do not count); exhausting this budget advances to the next transport.
 
 ## Rewrite chunks
 

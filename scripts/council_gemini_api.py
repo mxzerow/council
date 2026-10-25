@@ -3,7 +3,7 @@
 
 Run with python -I scripts/council_gemini_api.py config|preflight|models|call.
 Keys are loaded locally, sent only as a header, and never accepted in argv.
-Model fallback and retries belong to the harness (see core.md), not this script.
+Model fallback belongs to the harness; call retries 503 requests here (see core.md).
 """
 import argparse
 import http.client
@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import random
 import socket
 import sys
 import tempfile
@@ -23,7 +24,10 @@ BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 FREE_WARNING = ('council: Gemini API free tier - Google may use prompts and replies to improve its products '
                 'and humans may review them; do not send PHI or confidential text.')
 DEFAULTS = dict(enabled=False, tier='free', free_tier_ack=False, thinking_level='high',
-                max_output_review=32768, max_output_rewrite=65536, max_model_steps=2)
+                max_output_review=32768, max_output_rewrite=65536, max_model_steps=2,
+                unavailable_retry_wait_sec=20, unavailable_retries=1)
+SLEEP = time.sleep
+JITTER = lambda: random.uniform(0, 2)
 KEY_PATTERN = re.compile(r'[A-Za-z0-9_.\-]{20,}\Z')  # newer Google keys contain '.'
 SLUG_PATTERN = re.compile(r'[a-z0-9][a-z0-9.\-]*\Z')
 ROOT = Path(__file__).resolve().parent.parent
@@ -138,7 +142,8 @@ def validate_api(api):
         if api[key] not in values:
             raise APIError(f'gemini_api.{key}: invalid value')
     for key, lo, hi in [('timeout_sec', 30, 3600), ('max_output_review', 1024, 65536),
-                        ('max_output_rewrite', 1024, 65536), ('max_model_steps', 0, 5)]:
+                        ('max_output_rewrite', 1024, 65536), ('max_model_steps', 0, 5),
+                        ('unavailable_retry_wait_sec', 0, 120), ('unavailable_retries', 0, 3)]:
         if key in api and (type(api[key]) is not int or not lo <= api[key] <= hi):
             raise APIError(f'gemini_api.{key}: expected integer {lo}..{hi}')
     if 'key_file' in api and (not isinstance(api['key_file'], str) or not api['key_file'].strip()):
@@ -167,7 +172,14 @@ def read_config(root=ROOT):
         path = root / path
     api['key_file'] = str(path)
     source = 'env' if os.environ.get('COUNCIL_GEMINI_API_KEY') else ('file' if path.is_file() else 'missing')
-    return {'gemini_transport': transports, 'gemini_api': api, 'key_source': source, 'key_file': str(path)}
+    return {'gemini_transport': transports, 'gemini_api': api, 'key_source': source, 'key_file': str(path),
+            'outer_timeout_sec': outer_timeout(api)}
+
+
+def outer_timeout(api, timeout=None):
+    retries = api['unavailable_retries']
+    return ((timeout or api['timeout_sec']) * (1 + retries)
+            + retries * (api['unavailable_retry_wait_sec'] + 2) + 120)
 
 
 def load_key(config):
@@ -322,7 +334,7 @@ def main(argv=None):
         key = ''  # an unvalidated value must not be used as a redaction needle (would garble output)
     summary = dict(status='failed', **{'class': 'config'}, model=None, http=None,
                    usage=dict(prompt=0, thoughts=0, output=0, total=0), finish_reason=None,
-                   seconds=0, tier=None, max_output=None, detail=None)
+                   seconds=0, tier=None, max_output=None, detail=None, unavailable_retries_used=0)
     try:
         args = build_parser().parse_args(argv)
         config = read_config(args.root)
@@ -354,17 +366,28 @@ def main(argv=None):
                 raise APIError('--max-output: expected integer >= 1')
         key = ready(config)
         timeout = getattr(args, 'timeout', None) or api['timeout_sec']
+
+        def call_request(path, body=None):
+            for attempt in range(api['unavailable_retries'] + 1):
+                try:
+                    return request(path, key, timeout, body)
+                except APIError as exc:
+                    if exc.category != 'unavailable' or attempt == api['unavailable_retries']:
+                        raise
+                    summary['unavailable_retries_used'] += 1
+                    SLEEP(api['unavailable_retry_wait_sec'] + JITTER())
+
         if args.command == 'preflight':
             request('/models?pageSize=1', key, timeout)
         else:
             prompt = Path(args.prompt_file).read_text(encoding='utf-8-sig')
-            model = request('/models/' + args.model, key, timeout)
+            model = call_request('/models/' + args.model)
             limit = model.get('outputTokenLimit')
             if type(limit) is not int or limit < 1:
                 raise APIError('model outputTokenLimit is missing or invalid', 'other', 200)
             maximum = min(args.max_output or api['max_output_' + args.kind], limit)
             summary['max_output'] = maximum
-            data = request('/models/' + args.model + ':generateContent', key, timeout, {
+            data = call_request('/models/' + args.model + ':generateContent', {
                 'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
                 'generationConfig': {'maxOutputTokens': maximum,
                                      'thinkingConfig': {'thinkingLevel': args.effort or api['thinking_level']}}})

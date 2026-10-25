@@ -20,8 +20,7 @@ Sources (--source)
   agy          run `agy models`
   api          Gemini Developer API catalog (opt-in); stable generateContent models only
   codex        read ~/.codex/models_cache.json (UTF-8), entries with visibility "list"
-  grok         run `agent models`
-  cursor       run `cursor-agent --list-models` (a fallback lane for any family Cursor serves)
+  cursor       run `cursor-agent --list-models` (Grok seats only)
   file:PATH    slugs one per line (optionally `slug<TAB>label`), e.g. a Cursor Task enum
 
 Exit codes: 0 ok / skip (read the JSON `status`), 2 usage or IO error.
@@ -113,11 +112,8 @@ def catalog(source):
         elif source == "agy":
             out = run_cli(["agy"], ["models"]).replace("\r\n", "\n")
             slugs = [m.group(1) for m in re.finditer(r"^([a-z0-9][a-z0-9.\-]*)\t", out, re.M)]
-        elif source == "grok":
-            out = run_cli(["agent"], ["models"]).replace("\r\n", "\n")
-            slugs = [m.group(1) for m in re.finditer(r"^\s*\*?\s*(grok-[\w.\-]+)", out, re.M)]
         elif source == "cursor":
-            # Cursor's CLI can serve Gemini, GPT, Claude and Grok models from Cursor's own quota
+            # The CLI listing is broader than Council's Grok-only route.
             out = run_cli(["cursor-agent"], ["--list-models"]).replace("\r\n", "\n")
             slugs = [m.group(1) for m in re.finditer(r"^[ \t]*([a-z0-9][a-z0-9.\-]*) - ", out, re.M)]
         elif source == "codex":
@@ -251,6 +247,9 @@ def cmd_resolve(a):
     if a.family not in FAMILIES:
         raise UsageError(f"unknown family {a.family!r}")
     key = f"{a.family}/{a.line}/{a.effort or ''}"
+    if a.family == 'gemini' and a.source == 'cursor':
+        print(json.dumps(dict(status='skip', reason='cursor-invalid-for-gemini', key=key)))
+        return 0
     if a.pin:
         print(json.dumps({"status": "ok", "slug": a.pin, "from": "pin", "key": key}))
         return 0
@@ -381,6 +380,8 @@ def main(argv=None):
     fn = {"resolve": cmd_resolve, "mark-rejected": cmd_mark_rejected, "mark-good": cmd_mark_good,
           "classify": cmd_classify, "list": cmd_list}[a.cmd]
     try:
+        if getattr(a, 'source', None) == 'grok':
+            raise UsageError('unknown source: retired Grok CLI')
         return fn(a) or 0
     except (UsageError, OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)

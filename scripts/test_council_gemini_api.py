@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import socket
 from pathlib import Path
 import tempfile
 import threading
@@ -85,6 +86,10 @@ class API(unittest.TestCase):
                                            'HTTPS_PROXY': '', 'ALL_PROXY': ''})
         self.env.start()
         self.addCleanup(self.env.stop)
+        if hasattr(cga, 'SLEEP'):
+            sleeper = patch.object(cga, 'SLEEP')
+            sleeper.start()
+            self.addCleanup(sleeper.stop)
         self.base = patch.object(cga, 'BASE_URL', 'http://127.0.0.1:%s' % self.server.server_port)
         self.base.start()
         self.addCleanup(self.base.stop)
@@ -139,6 +144,96 @@ class API(unittest.TestCase):
         self.assertEqual(body['generationConfig'], {'maxOutputTokens': 32768, 'thinkingConfig': {'thinkingLevel': 'high'}})
         self.assertEqual(body['contents'][0]['parts'], [{'text': 'synthetic prompt'}])
         self.assertNotIn('service_tier', body)
+
+    def test_unavailable_retry_each_request_and_exhaustion(self):
+        for stage in ('get', 'generate'):
+            for failures, retries, category, used in [(1, 1, 'ok', 1), (2, 1, 'unavailable', 1),
+                                                      (1, 0, 'unavailable', 0)]:
+                with self.subTest(stage=stage, failures=failures, retries=retries):
+                    self.config(f'enabled: true\ntier: paid\nunavailable_retries: {retries}')
+                    model = {'outputTokenLimit': 32768}
+                    fail = cga.APIError('busy', 'unavailable', 503)
+                    responses = ([fail] * failures + [model, self.reply] if stage == 'get'
+                                 else [model] + [fail] * failures + [self.reply])
+                    with patch.object(cga, 'request', side_effect=responses), \
+                            patch.object(cga, 'SLEEP') as sleep, patch.object(cga, 'JITTER', return_value=1.25):
+                        code, result, _ = self.cli()
+                    self.assertEqual((code, result['class'], result['unavailable_retries_used']),
+                                     (0 if category == 'ok' else 1, category, used))
+                    self.assertEqual(sleep.call_args_list, [unittest.mock.call(21.25)] * used)
+
+    def test_quota_and_preflight_do_not_retry(self):
+        for command, category, http in [('call', 'quota', 429), ('preflight', 'unavailable', 503),
+                                        ('models', 'unavailable', 503)]:
+            with self.subTest(command=command), patch.object(cga, 'SLEEP') as sleep, \
+                    patch.object(cga, 'request', side_effect=cga.APIError('synthetic', category, http)) as request:
+                self.assertNotEqual(self.cli(command)[0], 0)
+                sleep.assert_not_called()
+                self.assertEqual(request.call_count, 1)
+
+    def test_socket_timeout_and_504_never_retry(self):
+        for stage in ('get', 'generate'):
+            for failure in ('socket', '504'):
+                with self.subTest(stage=stage, failure=failure):
+                    type(self).requests = []
+                    if failure == '504':
+                        if stage == 'get':
+                            type(self).get_status = 504
+                        else:
+                            type(self).status = 504
+                        with patch.object(cga, 'SLEEP') as sleep:
+                            code, result, _ = self.cli()
+                        self.assertEqual(len(self.requests), 1 if stage == 'get' else 2)
+                    else:
+                        # Keep request() real so socket-error classification is covered.
+                        with patch.object(cga.urllib.request, 'build_opener') as opener, \
+                                patch.object(cga, 'SLEEP') as sleep:
+                            response = opener.return_value.open.return_value.__enter__.return_value
+                            response.read.return_value = b'{"outputTokenLimit": 32768}'
+                            opener.return_value.open.side_effect = (
+                                [socket.timeout('synthetic timeout')] if stage == 'get' else
+                                [opener.return_value.open.return_value, socket.timeout('synthetic timeout')])
+                            code, result, _ = self.cli()
+                            self.assertEqual(opener.return_value.open.call_count, 1 if stage == 'get' else 2)
+                    self.assertEqual((code, result['class'], result['unavailable_retries_used']),
+                                     (1, 'timeout', 0))
+                    sleep.assert_not_called()
+                    type(self).status = type(self).get_status = 200
+
+    def test_retry_preserves_request_and_existing_output(self):
+        previous = self.root / 'reply.md'
+        previous.write_text('previous reply')
+        failure = cga.APIError('busy ' + KEY, 'unavailable', 503)
+        with patch.object(cga, 'request', side_effect=[{'outputTokenLimit': 32768}, failure, failure]) as request, \
+                patch.object(cga, 'SLEEP'), patch.object(cga, 'JITTER', return_value=0):
+            code, result, _ = self.cli()
+        self.assertEqual((code, result['class'], result['unavailable_retries_used']), (1, 'unavailable', 1))
+        self.assertEqual(previous.read_text(), 'previous reply')
+        self.assertEqual(request.call_args_list[-2], request.call_args_list[-1])
+
+    def test_each_request_can_retry_and_uses_configured_budget(self):
+        self.config('enabled: true\ntier: paid\nunavailable_retries: 3\nunavailable_retry_wait_sec: 0')
+        fail = cga.APIError('busy', 'unavailable', 503)
+        responses = [fail] * 3 + [{'outputTokenLimit': 32768}] + [fail] * 3 + [self.reply]
+        with patch.object(cga, 'request', side_effect=responses), patch.object(cga, 'SLEEP') as sleep, \
+                patch.object(cga, 'JITTER', return_value=2):
+            code, result, _ = self.cli()
+        self.assertEqual((code, result['status'], result['unavailable_retries_used']), (0, 'ok', 6))
+        self.assertEqual(sleep.call_args_list, [unittest.mock.call(2)] * 6)
+
+    def test_retry_config_ranges_and_outer_timeout(self):
+        for name, bad in [('unavailable_retries', '-1'), ('unavailable_retries', '4'),
+                          ('unavailable_retries', 'true'), ('unavailable_retry_wait_sec', '-1'),
+                          ('unavailable_retries', '"1"'), ('unavailable_retry_wait_sec', 'true'),
+                          ('unavailable_retry_wait_sec', '121'), ('unavailable_retry_wait_sec', '1.5')]:
+            self.config(f'{name}: {bad}')
+            self.assertEqual(self.cli('config')[0], 2)
+        for tier, timeout in [('free', 1200), ('paid', 300)]:
+            self.config(f'tier: {tier}')
+            result = self.cli('config')[1]
+            self.assertEqual(result['outer_timeout_sec'], timeout * 2 + 22 + 120)
+        self.config('timeout_sec: 40\nunavailable_retries: 3\nunavailable_retry_wait_sec: 0')
+        self.assertEqual(self.cli('config')[1]['outer_timeout_sec'], 286)
 
     def test_thoughts_stripped_and_overrides(self):
         self.reply['candidates'][0]['content']['parts'] = [{'thought': True, 'text': 'private reasoning'}, {'text': 'answer'}, {'text': '!'}]

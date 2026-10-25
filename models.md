@@ -8,6 +8,6 @@ This file was split on 2026-10-23 so a run loads only what it needs:
 | Claude Code, common seat-runner rules | [recipes/common.md](recipes/common.md) |
 | `gemini` seats (Antigravity `agy`) | [recipes/agy.md](recipes/agy.md) |
 | `gpt` seats (Codex CLI) | [recipes/codex.md](recipes/codex.md) |
-| `grok` seats (Grok CLI) | [recipes/grok.md](recipes/grok.md) |
+| `grok` seats (Cursor CLI) | [recipes/cursor.md](recipes/cursor.md) |
 
 Roster entries are `seats:` in [config.yaml](config.yaml) (family / line / effort / role; see [core.md](core.md#roster-seats)).

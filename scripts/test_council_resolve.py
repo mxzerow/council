@@ -211,8 +211,7 @@ class CursorListing(Env):
         self.assertTrue(all(" " not in s for s in slugs))
 
     def test_default_lineup_resolves_from_the_cursor_listing(self):
-        for fam, line, eff, want in [("gemini", "argon", "medium", "gemini-4-argon-medium"),
-                                     ("gemini", "flash", "medium", "gemini-3.8-flash-medium"),
+        for fam, line, eff, want in [("grok", "grok", "high", "cursor-grok-4.6-high-fast"),
                                      ("claude", "opus", "medium", "claude-opus-5-5-medium"),   # 5.5 beats 5; plain beats -fast
                                      ("gpt", "sol", "medium", "gpt-5.6-sol-medium")]:
             code, r = self.run_cli("resolve", "--family", fam, "--line", line, "--effort", eff, "--source", self.src(), "--state", self.state)
@@ -220,6 +219,19 @@ class CursorListing(Env):
 
 
 class CursorSource(Env):
+    def test_gemini_cursor_skip_even_with_pin_or_last_good(self):
+        self.run_cli('mark-good', '--key', 'gemini/flash/', '--slug', 'gemini-3.8-flash', '--state', self.state)
+        for flags in ([], ['--pin', 'gemini-4-flash']):
+            with patch.object(cr, 'catalog', side_effect=AssertionError('must not query')):
+                code, result = self.run_cli('resolve', '--family', 'gemini', '--line', 'flash',
+                                            '--source', 'cursor', '--state', self.state, *flags)
+            self.assertEqual((code, result['status'], result['reason']), (0, 'skip', 'cursor-invalid-for-gemini'))
+
+    def test_retired_source_is_usage_error(self):
+        for flags in ([], ['--pin', 'grok-4.6']):
+            self.assertEqual(self.run_cli('resolve', '--family', 'grok', '--line', 'grok',
+                                          '--source', 'grok', *flags)[0], 2)
+
     def test_cursor_source_parses_the_cli_listing(self):
         listing = ("Available models\r\n\r\ngemini-4-argon-medium - Gemini 4 Argon Medium\r\n"
                    "gemini-3.8-flash-low - Gemini 3.8 Flash Low\r\ngemini-3.8-flash-medium - Gemini 3.8 Flash Medium\r\n"
@@ -229,7 +241,7 @@ class CursorSource(Env):
         try:
             self.assertEqual(cr.catalog("cursor"), ["gemini-4-argon-medium", "gemini-3.8-flash-low", "gemini-3.8-flash-medium", "claude-sonnet-5-5-high"])
             code, r = self.run_cli("resolve", "--family", "gemini", "--line", "flash", "--effort", "low", "--source", "cursor", "--state", self.state)
-            self.assertEqual(r["slug"], "gemini-3.8-flash-low")
+            self.assertEqual((r["status"], r["reason"]), ("skip", "cursor-invalid-for-gemini"))
         finally:
             cr.run_cli = old
 

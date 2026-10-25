@@ -8,7 +8,7 @@ A harness defines: the shared root, Start/confirm, **DISPATCH(seat)** (how one s
 
 ## Roster (`seats:`)
 
-One list, `seats:` in `config.yaml`, for both harnesses. A seat names a **model**, not a transport.
+Use only the `seats` JSON returned by `council_roster.py load` as the roster for both harnesses; never read `config.yaml` seats directly. A local `seats:` replaces the whole shared list. A seat names a **model**, with optional transport overrides.
 
 | Key | Required | Values |
 |-----|----------|--------|
@@ -18,6 +18,8 @@ One list, `seats:` in `config.yaml`, for both harnesses. A seat names a **model*
 | `role` | no | `reviewer` (default) \| `breadth-auditor` \| `rewriter` |
 | `label` | no | Display name |
 | `pin` | no | Exact slug, used verbatim; disables version resolution for the seat |
+| `transports` | no | Replaces this seat's route list; filtered for the current origin |
+| `fallback_for` | no | Exact, case-sensitive label of the immediately preceding reviewer |
 
 **Roles are strict:** an unrecognized `role` is a config error in both harnesses (stop at Start). A typo must never turn a seat into a different kind of seat.
 
@@ -26,36 +28,74 @@ One list, `seats:` in `config.yaml`, for both harnesses. A seat names a **model*
 - `rewriter`: the final readability rewrite ([Stages](#stages), step 4). It is not a review: Same-model skip does not apply, and it runs after integration. Several `rewriter` seats are an **ordered fallback chain**: exactly one does the rewrite (the first that resolves and works).
 - The integration pass is a **stage**, not a seat; the parser knows it as `--role integrator`, the only role allowed to return a changed Revised.
 
-**Transport** is per harness. Gemini seats follow [Gemini transport](#gemini-transport). Other families use Task in Cursor; Claude Code uses Codex CLI for `gpt`, Grok CLI for `grok`, and skips `claude` reviewers. A family with no transport is **skipped, not an error** (`no-transport`). **Model versions** are resolved by [Model resolution](#model-resolution), never stored. `max_reviewers` caps the seats used; list order is run order.
+## Routing
+
+Origin identifies the orchestrator: Cursor IDE always passes `--origin cursor`; all others pass `--origin default`. Load and validate configuration at Start with `python -I scripts/council_roster.py load --root <shared> --origin <origin>`. Use its effective `seats`, `transports`, `dispatch`, skips and warnings; never reconstruct the roster from YAML. List order is run order. Model versions resolve per [Model resolution](#model-resolution).
+
+| Family | default origin | cursor origin |
+|---|---|---|
+| gemini | api, agy | api, agy |
+| gpt | codex | task |
+| grok | cursor_cli | cursor_cli |
+| claude | agent | task |
+| composer | none | task |
+
+These are the allowed transports and built-in ordered routes. `routes.<origin>.<family>` overrides each pair independently; missing pairs use the built-ins, and `[]` skips with `no-transport`. Local route keys override shared route keys. A seat's `transports` replaces its route in both origins and must be allowed in at least one origin; the loader filters it for this origin. Show `skip_detail` naming dropped transports, every skip and warning at Start, never silently.
+
+Gemini is NEVER routed through Cursor: `cursor`, `cursor_cli` and `task` are invalid for Gemini in routes, seat overrides and the legacy alias (see `config.migrations.yaml` version 2). The runner refuses cursor + Gemini with `cursor-invalid-for-gemini`, and the resolver skips it. Grok uses only the Cursor CLI: config `cursor_cli` maps to runner `cursor` and resolver source `cursor`. The separate Grok CLI route is retired. Cursor models are never backups for another family. `api`, `agy`, `codex` map directly to runner/source names; `task` and `agent` are harness tools with no runner. In default origin with a Claude orchestrator, Claude reviewers skip as same-model; a Claude rewriter uses an Agent subagent (`model: sonnet`).
+
+The deprecated `gemini_transport` alias accepts only api/agy, sets both origins' Gemini route for that file, and emits a warning. It cannot coexist with `routes.*.gemini` in the same file. The default Gemini route is `[api, agy]`.
+
+Before a runner transport's first seat, use `council_seat.py preflight --transport T --root <shared> --run <run> --model <slug>` (API needs no model). A failed preflight skips that transport for all seats this run. The `cursor-invalid-for-gemini` refusal is NOT a transport preflight failure: it logs its own token without a `cli-preflight-*` prefix, rejects only that Gemini route, and leaves Cursor available for Grok. API config refusal logs `api-refused` once at preflight, then skip the API for the run. Resolve again with each transport's source; a seat failure advances to its next transport. Say which served the seat. The runner logs one failures.md line per failed run/preflight; never duplicate it. Use `council_seat.py skip --run <run> --seat <n> --label <label> --reason <reason> --detail <detail>` for orchestrator skips. Parser outcomes already log themselves. Recipes are optional setup notes, not a dependency for project copies.
+
+## Fallback seats
+
+`fallback_for` names exactly one target by its case-sensitive label. The loader requires a label on the fallback, an immediately preceding reviewer/breadth-auditor target that is not itself a fallback, at most one fallback per target, and no role or the same role (inherited). Invalid references or roles are config errors.
+
+Only after the primary exhausts ALL transports, retries, model steps and parser `--final-attempt`, run `python -I scripts/council_parse.py seat-state --run <run> --seat <n>`. If `parsed: true`, do nothing: no fallback dispatch or log. If false (including skip, api-refused, no-transport, same-model, preflight/resolver failure or final malformed reply), log via `council_seat.py skip --reason fallback-triggered --detail "<primary label>: <last failure class or skip reason>"` with run, seat and fallback label; then run the fallback's own same-model check and all its transports under the normal rules. If it also ends unparsed, log `fallback-failed` through `skip`.
+
+Reuse primary number n, gaps `G<n>-<k>`, header `seat: n of <total>`; keep `--total` and the integrator number unchanged. Rebuild `seat-<n>-prompt.md`; runner `--stem seat-<n>-fb`, reply `seat-<n>-fb-reply.txt` (Cursor) or `seat-<n>-fb-<slug>.md` (Claude Code). A parsed fallback satisfies the external-review minimum for slot n.
+
+`max_reviewers` counts non-fallback reviewers in list order; keep a fallback iff its target is kept. Local max overrides shared, then 7. Runtime overrides carry neither `transports` nor `fallback_for`, use routes, and drop fallbacks whose target is absent from the effective roster.
 
 ## Gemini transport
 
-A Gemini seat walks `gemini_transport` in order; default `[agy, cursor]` preserves existing behavior. Both harnesses dispatch `agy`, `api` and `cursor` through `scripts/council_seat.py run`; Cursor does not use Task for Gemini. The runner holds dispatch logic; recipes are optional setup/measurement notes and are not required in project copies. Before a transport's first seat, use `council_seat.py preflight --transport T --root <shared> --run <run> --model <slug>` (API needs no model). Missing CLIs fail cleanly and skip only that transport. API requires enabled configuration and successful runner preflight; configuration refusals are reported as `api-refused` on run outcomes. Resolve again with each transport's source. A seat-level failure advances to the next transport; say which served the seat. Read the runner summary and surface free_tier_warning once per run. It writes exactly one failures.md line per failed run/preflight; never duplicate it. Log other orchestrator skips with `council_seat.py skip --run <run> --seat <n> --label <label> --reason <reason> --detail <detail>`. Parser outcomes are already logged by council_parse.py.
+A Gemini seat walks only its loaded api/agy transports in order, through `council_seat.py run`. Surface `free_tier_warning` once per run.
 
-Before dispatch, run `python -I scripts/council_gemini_api.py config --root <shared>` for the effective settings. `config.local.yaml` overrides `config.yaml` per key, then built-in defaults apply. Invalid settings are exit 2 and name the offending key. `gemini_transport` is a non-empty ordered list of unique `agy|api|cursor` values (flow or block list). Unknown `gemini_api` keys are invalid. Boolean values must be literal `true|false`; tier is `free|paid`; thinking level is `low|medium|high`; timeout is an integer 30..3600; output caps are integers 1024..65536; model steps are an integer 0..5; key_file is a path string with `~` expanded. Free tier requires `free_tier_ack: true`; never send PHI or confidential text through it.
+Before dispatch, run `python -I scripts/council_gemini_api.py config --root <shared>` for the effective settings. `config.local.yaml` overrides `config.yaml` per key, then built-in defaults apply. Invalid settings are exit 2 and name the offending key. Validate routes and the roster through `council_roster.py load`; the API config command only validates API settings. The deprecated alias accepts a non-empty unique api/agy list. Unknown `gemini_api` keys are invalid. Boolean values must be literal `true|false`; tier is `free|paid`; thinking level is `low|medium|high`; timeout is an integer 30..3600; output caps are integers 1024..65536; model steps are an integer 0..5; unavailable_retries is an integer 0..3 and unavailable_retry_wait_sec an integer 0..120; key_file is a path string with `~` expanded. Free tier requires `free_tier_ack: true`; never send PHI or confidential text through it.
 
 API review prompts always use `council_prompt.py build ... --mode inline`, even for large packets: the API reads the prompt from a file and has no tools or argv-size limit. For rewrites, pass the chunk prompt file to council_seat.py run with `--kind rewrite --stem rewrite/chunk-<i>`; the runner appends the tail and saves the API prompt. Use `gemini_api.thinking_level` (default `high`), independent of seat effort: do not pass the seat's effort to this lane. The script's optional `--effort low|medium|high` is an explicit API override only. Review output defaults to 32768 tokens; rewrite to 65536, clamped to model `outputTokenLimit`. No token optimisation, `includeThoughts`, or `service_tier` on this lane.
 
-The API script makes one call and reports a JSON class; the harness applies these rules:
+`call` retries a 503 on the same request/model after `unavailable_retry_wait_sec` (default 20) plus uniform 0..2 s jitter, up to `unavailable_retries` (default 1). This applies separately to model GET and generation; not preflight/models. Summary includes `unavailable_retries_used`. Internal retries are not dispatches and do not consume the dispatch cap. The harness handles the final class:
 
-| Condition / class | Action within api |
+| Event | Action |
 |---|---|
-| Non-empty 200 / `ok` | `mark-good`, then parse the reply |
-| No candidates or no non-thought text / `empty` | Retry once on the same model, then next transport |
-| 404, or 400 model unsupported/not found / `model-rejected` | `mark-rejected` (7 days), resolve the next-lower version of the same family and line |
-| 429 / `quota` | `resolve --exclude <slug>` (repeat for each excluded slug this run); next-lower same line; do not cache |
-| 503 / `unavailable` | `mark-rejected --days 1 --reason unavailable`, resolve next-lower same line |
-| 500 or 502 / `network` | Retry once on the same model, then next transport |
-| Other DNS/TLS/reset/URL error / `network` | Next transport |
-| 504 or socket timeout / `timeout` | Next transport; never lower the model |
-| 401/403 / `auth`; other 400 / `other` | Log and use next transport; no model step |
-| Config/IO refusal / `config` (exit 2) | `api-refused: <reason>`, next transport |
+| API 429 `quota` | No wait. `resolve --exclude <slug>`; next-lower same line (up to `max_model_steps`); then the next transport of the seat (Argon: agy); then the fallback seat if any |
+| API 503 `unavailable` | Script waits 20 s + 0..2 s and retries the same model once; still 503: `mark-rejected --days 1 --reason unavailable`, next-lower, then next transport |
+| API 500/502 `network` | Retry once (orchestrator, same model), then next transport |
+| API 504 / socket `timeout` | Next transport; never lower the model |
+| API 404 / 400-model `model-rejected` | `mark-rejected` 7 days; next-lower same line |
+| API `auth` / `other` | Log, next transport |
+| API `empty` | Retry once, then next transport |
+| API `config` (disabled, no ack, no key) | `api-refused: <reason>` logged once by preflight; transport skipped for the run (Argon goes straight to agy) |
+| CLI preflight failure (agy, codex, cursor_cli) | Transport skipped for all seats this run (`cli-preflight-*`) |
+| CLI `model-rejected` | `mark-rejected`, re-resolve once (`upgrade-rejected`) |
+| CLI quota/auth/network/timeout/other | Next transport |
+| Task error | Existing Cursor rule (`seat-<n>-error.txt`, classify) |
+| cursor transport with a Gemini slug | Runner refuses (`cursor-invalid-for-gemini`, logged); resolver skips; config load rejects. Not a transport preflight failure; Cursor remains available for Grok |
+| Malformed reply | Retry once, then `--final-attempt` |
+| Argon unparsed after api AND agy (or skipped) | `fallback-triggered` logged; Flash fallback runs as seat 1 (api, then agy) |
+| Fallback ends unparsed | `fallback-failed` logged; slot contributes nothing |
+| All reviewers unparsed | Stop before integration: "no external review" |
+| Rewriter seat failure | Its remaining transports, then next rewriter; none: keep the integrated artifact |
 
-Only the listed rejection/quota/unavailable conditions allow model steps, at most `max_model_steps` (default 2) per seat. Flash never becomes Argon. A pin is never downgraded: retry the same pin only where allowed, then next transport. No latency-based fallback: each call gets its full timeout (default free 1200 s, paid 300 s; `gemini_api.timeout_sec` overrides). The two-dispatch rule is per **(seat, transport, model)**; total API generation calls per seat are at most `2 * (1 + max_model_steps)`, including rewrite chunks and retries. If the cap is reached before a rewrite finishes, restart on the next transport.
+Only the listed rejection/quota/unavailable conditions allow model steps, at most `max_model_steps` (default 2) per seat. Flash never becomes Argon. A pin is never downgraded: retry the same pin only where allowed, then next transport. No latency-based fallback: each call gets its full timeout (default free 1200 s, paid 300 s; `gemini_api.timeout_sec` overrides). The two-dispatch rule is per **(seat, transport, model)**; total API generation dispatches per seat are at most `2 * (1 + max_model_steps)`, including rewrite chunks and orchestrator retries; in-script 503 retries do not count. If the cap is reached before a rewrite finishes, restart on the next transport.
+
+API config reports `outer_timeout_sec = timeout_sec * (1 + unavailable_retries) + unavailable_retries * (unavailable_retry_wait_sec + 2) + 120` (2542 s for free defaults). The runner and harness background budget use this outer timeout; timeouts never lower a model.
 
 Rewrite transport and model are fixed once chunk 1 succeeds. A later seat-level failure or exhausted API budget runs `prepare` again and restarts the whole rewrite on the next transport/model; never mix voices within one run. Try the remaining transports of the current rewriter before advancing to the next rewriter seat.
 
-**Migration.** The old `reviewers:` / `cursor_reviewers:` keys are removed. If either is present without `seats:`, stop at Start and point here: drop `kind`, `command`, `model`; turn `model` into `family`/`line`/`effort` (`gemini-4-argon-medium` → gemini/argon/medium; Codex `gpt-5.6-sol` + `effort: medium` → gpt/sol/medium); keep `role` and `label`.
+**Migration.** See `config.migrations.yaml` and the pending entries returned by `council_roster.py load`. Both harnesses show each pending change once at Start and ask before any local edit or `stamp`. Old `reviewers`/`cursor_reviewers` without `seats` are an error. Never edit shipped `config.yaml`.
 
 ## Model resolution
 
@@ -65,15 +105,15 @@ A seat stores `family` + `line` + `effort`. `scripts/council_resolve.py` turns i
 python -I scripts/council_resolve.py resolve --family F --line L [--effort E] [--pin SLUG] --source S --state <runs_dir>\_resolved.json
 ```
 
-`--source`: Gemini uses its selected transport (`agy`, `api`, `cursor`) in both harnesses. Other Claude Code sources are `codex` (gpt), `grok` (grok); non-Gemini Cursor seats use the Task `file:<runs_dir>\task-models.txt` catalog. The script reads the catalogs itself, so a 40 KB Codex cache never enters your context. Output is one JSON line; `status: skip` means try the next available transport, then skip the seat if none works.
+`--source`: Gemini uses api or agy in both harnesses; Grok uses `cursor`. Other Claude Code sources are `codex` (gpt); Cursor gpt/claude/composer seats use the Task `file:<runs_dir>\task-models.txt` catalog. The script reads the catalogs itself, so a 40 KB Codex cache never enters your context. Output is one JSON line; `status: skip` means try the next available transport, then skip the seat if none works.
 
 It enforces: the **newest version of the same family and line**, compared numerically (3.10 > 3.9 > 3.8); **never another line** (Flash never becomes Argon; a `pro` line with no catalog entry is `no-line-match`); effort exact, else nearest at the newest version (`effort_note`); a `pin` used verbatim (never upgraded, never downgraded); slugs rejected within the last 7 days skipped (`cooldown_skipped`); catalog unreachable, failing (non-zero exit), or empty → the last slug that worked (`from: last_good`), else skip `no-catalog`. Release stamps (`-20261001`) are not versions, `5` equals `5.0`, and `-latest`/`-preview`/`-beta` variants lose to the plain slug at equal version. Cooldown and last-good writes are locked, so parallel runs cannot lose each other's updates. Tell the user in one line when a seat moved to a newer version (`upgraded_from`) or used `last_good`. Never write `config.yaml` for any of this.
 
-After a dispatch: on success `mark-good --key <key> --slug <slug> --state <state>`. For API failures use the JSON `class` and the [Gemini table](#gemini-transport): `unavailable` has a one-day cooldown, `quota` uses invocation-only exclusions, and `timeout` never lowers the model. For other transports run `classify --file <stderr or reply>`: only **`model-rejected`** is cached. Then `mark-rejected --slug <slug> --state <state>`, `resolve` once more, tell the user (`upgrade-rejected`), and use it. Other failures advance to the next transport, then skip the seat when none remains (reason named in `failures.md`). Pins never downgrade. Other commands: `list --source S [--family F]` shows what a catalog offers. Tests: `cd scripts && python -B -m unittest test_council_resolve`.
+After a dispatch: on success `mark-good --key <key> --slug <slug> --state <state>`. For API failures use the JSON `class` and the [failure table](#gemini-transport): `unavailable` has a one-day cooldown, `quota` uses invocation-only exclusions, and `timeout` never lowers the model. For other transports run `classify --file <stderr or reply>`: only **`model-rejected`** is cached. Then `mark-rejected --slug <slug> --state <state>`, `resolve` once more, tell the user (`upgrade-rejected`), and use it. Other failures advance to the next transport, then skip the seat when none remains (reason named in `failures.md`). Pins never downgrade. Other commands: `list --source S [--family F]` shows what a catalog offers. Tests: `cd scripts && python -B -m unittest test_council_resolve`.
 
 ## Runtime override (this run only)
 
-The user may name a different roster in the `/council` message: `this time only: Grok then Gemini`, `models: gemini argon, gpt sol`, or exact slugs. Resolve each name as family + line through the resolver (or as an exact slug, which is a `pin`). The override **replaces** the roster in the order given unless the request is clearly additive ("also run Grok"). Same-model skip still applies to it. Never write `config.yaml` for an override; persist only through Reconfigure when the user says to save. A name that cannot be resolved is left out and reported, never guessed.
+The user may name a different roster in the `/council` message: `this time only: Grok then Gemini`, `models: gemini argon, gpt sol`, or exact slugs. Resolve each name as family + line through the resolver (or as an exact slug, which is a `pin`). The override **replaces** the roster in the order given unless the request is clearly additive ("also run Grok"). Same-model skip still applies to it. Overrides never carry `transports`/`fallback_for`; use the routes and drop any fallback whose target is absent. Never write `config.yaml` for an override; persist only through Reconfigure when the user says to save. A name that cannot be resolved is left out and reported, never guessed.
 
 ## When not to use
 
@@ -132,9 +172,9 @@ A model must not review its own draft. After seat 0 store `seat0_family` in `met
 
 Seats run one after another, never in parallel. For each reviewer in roster order:
 
-1. Apply [Same-model skip](#same-model-skip) and the roster rules (`no-transport`). `rewriter` seats are not reviewers: they run in the rewrite stage.
+1. For a fallback, first apply the [Fallback seats](#fallback-seats) `seat-state` gate after the primary has exhausted all transports and final parsing; never run a fallback just because one transport failed. Apply [Same-model skip](#same-model-skip) and the roster rules (`no-transport`). `rewriter` seats are not reviewers: they run in the rewrite stage.
 2. Get the **open blocking IDs**: `python -I scripts/council_parse.py open-ids --run <run>` (blocking IDs whose latest verdict is not `addressed`; `rejected` and `unresolved` stay open). Packet files are already current.
-3. Build the seat prompt with `python -I scripts/council_prompt.py build --run <run> --seat <n> --label <label> --family <family> --role <role> --total <n>`. It writes `seat-<n>-prompt.md` and prints one JSON line. **Inline mode** (the default when the whole prompt fits in 24,000 characters) puts the contract, the breadth addendum for a `breadth-auditor`, `request.md`, `artifact.md`, `open-gaps.md` and real dissent in the prompt itself, so the seat is one model call with no tools; **file mode** (a packet too big for a command line) writes a pointer prompt that lists absolute paths. Either way the prompt carries the seat fields, the open blocking IDs, the inlined envelope, and a plain statement that the seat is **gaps only**; placeholder files (`none`) are left out and `meta.md` never appears. For API, always build with `--mode inline` and pass the prompt file path to the helper. For other runner transports, pass `--prompt-file` and select `--delivery inline|pointer`; codex/grok always use pointer. Task seats use the harness-specific file pointer. Never paste `artifact.md` into an argv or Task prompt yourself.
+3. Build the seat prompt with `python -I scripts/council_prompt.py build --run <run> --seat <n> --label <label> --family <family> --role <role> --total <n>`. It writes `seat-<n>-prompt.md` and prints one JSON line. **Inline mode** (the default when the whole prompt fits in 24,000 characters) puts the contract, the breadth addendum for a `breadth-auditor`, `request.md`, `artifact.md`, `open-gaps.md` and real dissent in the prompt itself, so the seat is one model call with no tools; **file mode** (a packet too big for a command line) writes a pointer prompt that lists absolute paths. Either way the prompt carries the seat fields, the open blocking IDs, the inlined envelope, and a plain statement that the seat is **gaps only**; placeholder files (`none`) are left out and `meta.md` never appears. For API, always build with `--mode inline` and pass the prompt file path to the helper. For other runner transports, pass `--prompt-file` and select `--delivery inline|pointer`; codex always uses pointer. Task seats use the harness-specific file pointer. Never paste `artifact.md` into an argv or Task prompt yourself.
 4. **DISPATCH(seat)** (harness-specific), then run the parser (below). CLI/API dispatch and preflight use council_seat.py, which logs their failures; other skips use council_seat.py skip. Parser outcomes are already logged by council_parse.py.
 
 At most **two dispatches** per (seat, transport, model), initial + one retry for any reason. Gemini's API model-step and total-call caps are in [Gemini transport](#gemini-transport).
@@ -183,5 +223,5 @@ After Return (never delete the current run), under `<runs_dir>` delete folders t
 2. **Gaps not incorporated** (omit when every gap was addressed): every gap still open after integration with ID, tier, minting seat and the integrator's reason (`rejected — why`, `unresolved`, or restored); optional IDs nobody STATUSed once. Do not silently rewrite the artifact from them.
 3. Other non-`none` items in `unresolved.md` as a short **Unresolved** list.
    If the rewrite stage ran: say so, and list its additions from `rewrite-report.json` as **Added explanations (N)** (they are the rewriter's, not the author's), any chunks that kept their original wording, and that the pre-rewrite text is `artifact-pre-rewrite.md`.
-4. One line: roster used with skips, failures and remaps (`same-model`, `no-transport`, `rejected-family`, `rejected-slug`, `family-remap`, `seat0-id-strip`, `rewrite-fallback`, `revised-not-allowed`, `revised-rejected`, `illegal-identity`, `cli-preflight-agent|agy|codex`, parse failures, timeouts, `path-refuse-role`).
+4. One line: roster used with skips, failures and remaps (`same-model`, `no-transport`, `rejected-family`, `rejected-slug`, `family-remap`, `seat0-id-strip`, `rewrite-fallback`, `revised-not-allowed`, `revised-rejected`, `illegal-identity`, `cli-preflight-cursor|agy|codex|api`, `fallback-triggered`, `fallback-failed`, `cursor-invalid-for-gemini`, `api-refused`, parse failures, timeouts, `path-refuse-role`).
 5. If the exchange was requested: write `<run>/exchange.md`; set `<runs_dir>/last-exchange.md` to one line with its absolute path (Claude Code instead appends the transcript in chat). Secret hygiene applies.

@@ -33,7 +33,7 @@ class SeatTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.dict(os.environ, {'COUNCIL_GEMINI_API_KEY': ''}).start()
         patch.object(seat, 'resolve_launcher', return_value=([sys.executable, str(self.stub)], 'fake')).start()
-        patch.object(seat.api, 'read_config', return_value={'gemini_api': {'timeout_sec': 300}}).start()
+        patch.object(seat.api, 'read_config', return_value={'gemini_api': {'timeout_sec': 300, 'unavailable_retries': 1, 'unavailable_retry_wait_sec': 20}}).start()
 
     def invoke(self, body, transport='agy', extra=(), command='run'):
         self.stub.write_text(body, encoding='utf-8')
@@ -50,6 +50,35 @@ class SeatTests(unittest.TestCase):
 
     def failures(self):
         return (self.run / 'failures.md').read_text(encoding='utf-8')
+
+    def test_cursor_refuses_gemini_before_launch(self):
+        for command in ('run', 'preflight'):
+            for model in ('gemini-4-argon-medium', 'cursor-gemini-4-argon', 'unknown-GEMINI-model'):
+                with self.subTest(command=command, model=model), \
+                        patch.object(seat, 'execute', side_effect=AssertionError('must not launch')):
+                    before = self.failures().count('\n') if (self.run / 'failures.md').exists() else 0
+                    code, result = self.invoke('', 'cursor', ['--model', model], command)
+                    self.assertEqual((code, result['class']), (2, 'cursor-invalid-for-gemini'))
+                    if command == 'run':
+                        self.assertEqual(self.failures().count('\n'), before + 1)
+        code, result = self.invoke('print(\'{"result":"ok"}\')', 'cursor', ['--model', 'cursor-grok-4.6'])
+        self.assertEqual((code, result['status']), (0, 'ok'))
+
+    def test_retired_transport_is_rejected(self):
+        with patch.object(seat, 'execute', side_effect=AssertionError('must not launch')):
+            self.assertEqual(self.invoke('', 'grok')[0], 2)
+
+    def test_cursor_gemini_refusal_is_not_transport_preflight_failure(self):
+        for command in ('preflight', 'run'):
+            with self.subTest(command=command):
+                code, result = self.invoke('', 'cursor', ['--model', 'gemini-4-argon-medium'], command)
+                self.assertEqual((code, result['class']), (2, 'cursor-invalid-for-gemini'))
+                line = self.failures().splitlines()[-1]
+                self.assertIn(': cursor-invalid-for-gemini ', line)
+                self.assertNotIn('cli-preflight-cursor', line)
+        code, result = self.invoke('print(\'{"result":"PREFLIGHT-OK"}\')', 'cursor',
+                                   ['--model', 'cursor-grok-4.6'], 'preflight')
+        self.assertEqual((code, result['status']), (0, 'ok'))
 
     def test_success_usage_and_atomic_reply(self):
         response = json.dumps({'response': 'hello\nworld', 'usage': {'total': 7}})
@@ -130,7 +159,7 @@ class SeatTests(unittest.TestCase):
 
     def test_successful_replies_may_discuss_failure_patterns(self):
         text = 'Hook blocked; $OutputEncoding; OutputEncoding; permission check failed; user denied permission'
-        for transport, field in [('agy', 'response'), ('cursor', 'result'), ('grok', 'text')]:
+        for transport, field in [('agy', 'response'), ('cursor', 'result')]:
             with self.subTest(transport=transport):
                 code, data = self.invoke(f'print({json.dumps({field: text})!r})', transport)
                 self.assertEqual((code, data['status']), (0, 'ok'))
@@ -298,15 +327,15 @@ class SeatTests(unittest.TestCase):
         self.assertEqual((code, data['class']), (1, 'not-found'))
         self.assertEqual(self.failures(), 'preflight (agy): cli-preflight-agy (not-found: missing)\n')
 
-    def test_preflight_success_version_and_grok_token(self):
+    def test_preflight_success_version_and_cursor_token(self):
         body = 'import sys; print("v1" if "--version" in sys.argv else \'{"response":"PREFLIGHT-OK"}\')'
         code, data = self.invoke(body, command='preflight')
         self.assertEqual((code, data['version']), (0, 'v1'))
         self.assertEqual((self.run / 'cli-preflight.txt').read_text(), 'PREFLIGHT-OK')
         self.assertFalse((self.run / 'failures.md').exists())
-        code, data = self.invoke('print(\'{"text":"wrong"}\')', 'grok', command='preflight')
+        code, data = self.invoke('print(\'{"result":"wrong"}\')', 'cursor', command='preflight')
         self.assertEqual(code, 1)
-        self.assertIn('preflight (grok): cli-preflight-agent (', self.failures())
+        self.assertIn('preflight (cursor): cli-preflight-cursor (', self.failures())
 
     def test_codex_preflight_probe_deleted(self):
         body = ('import sys; from pathlib import Path; '
@@ -341,7 +370,7 @@ class SeatTests(unittest.TestCase):
         self.assertEqual(self.reply.read_text(), 'UNIQUE_PROMPT_MARKER\n\nDo not use any tools or read any files. Output only the rewritten chunk followed by the final REWRITE_END line.')
 
     def test_inline_refused_for_pointer_transports(self):
-        for transport in ('codex', 'grok'):
+        for transport in ('codex',):
             code, _ = self.invoke('raise AssertionError', transport, ['--delivery', 'inline'])
             self.assertEqual(code, 2)
 
@@ -377,7 +406,7 @@ class SeatTests(unittest.TestCase):
             return original(*args)
         with patch.object(seat, 'execute', recording):
             code, data = self.invoke('', 'api', ['--kind', 'rewrite', '--stem', 'rewrite/chunk-3', '--timeout', '90', '--effort', 'low'])
-        self.assertEqual((code, limits), (0, [210]))
+        self.assertEqual((code, limits), (0, [322]))
         expected = 'UNIQUE_PROMPT_MARKER\n\nDo not use any tools or read any files. Output only the rewritten chunk followed by the final REWRITE_END line.'
         self.assertEqual(self.reply.read_text(), expected)
         self.assertEqual((self.run / 'rewrite/chunk-3-api-prompt.md').read_text(), expected)
@@ -394,6 +423,25 @@ class SeatTests(unittest.TestCase):
             'assert "--out" not in sys.argv; print(\'{"status":"ok","class":"ok"}\')')
         self.assertEqual(self.invoke('', 'api', command='preflight')[0], 0)
         self.assertFalse((self.run / 'failures.md').exists())
+
+    def test_api_preflight_refusal_logs_once(self):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        (scripts / 'council_gemini_api.py').write_text(
+            'print(\'{"status":"refused","class":"config","detail":"disabled"}\')')
+        code, result = self.invoke('', 'api', command='preflight')
+        self.assertEqual((code, result['class']), (2, 'config'))
+        self.assertEqual(self.failures().count('\n'), 1)
+        self.assertIn('api-refused', self.failures())
+
+    def test_api_default_outer_timeout_and_retry_settings(self):
+        for timeout, retries, wait, expected in [(1200, 1, 20, 2542), (300, 0, 20, 420),
+                                                 (40, 3, 0, 286)]:
+            settings = dict(timeout_sec=timeout, unavailable_retries=retries, unavailable_retry_wait_sec=wait)
+            with patch.object(seat.api, 'read_config', return_value={'gemini_api': settings}), \
+                    patch.object(seat, 'execute', return_value=(1, False, 0)) as execute:
+                self.invoke('', 'api')
+            self.assertEqual(execute.call_args.args[3], expected)
 
     def test_isolated_cli_smoke(self):
         proc = subprocess.run([sys.executable, '-I', str(Path(seat.__file__)), 'skip', '--run', str(self.run),
@@ -412,8 +460,6 @@ class SeatTests(unittest.TestCase):
                                 '--add-dir', 'review-root', '--model', 'm', '--output-format', 'json', '-p', 'PROMPT']),
             ('cursor', 'inline', ['fake', '-p', 'PROMPT', '--model', 'm', '--output-format', 'json',
                                   '--mode', 'ask', '--trust', '--workspace', 'empty']),
-            ('grok', 'pointer', ['fake', '-p', 'PROMPT', '--model', 'm', '--permission-mode', 'plan',
-                                 '--output-format', 'json', '--cwd', str(self.run), '--max-turns', '12']),
         ]
         for transport, delivery, want in cases:
             a.transport, a.delivery = transport, delivery
@@ -527,7 +573,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(raised.exception.category, 'ps-runtime')
 
     def test_batch_files_refused_and_posix_plain_paths(self):
-        for transport, name in [('agy', 'agy'), ('cursor', 'cursor-agent'), ('codex', 'codex'), ('grok', 'agent')]:
+        for transport, name in [('agy', 'agy'), ('cursor', 'cursor-agent'), ('codex', 'codex')]:
             self.assertEqual(self.resolve(transport, {name: '/fake/' + name}, 'linux')[0], ['/fake/' + name])
             for suffix in ('.cmd', '.BAT'):
                 with self.assertRaises(seat.SeatError):

@@ -6,7 +6,7 @@ What a Cursor session's **Task tool** offered on 2026-10-23, as reported by the 
 
 | Slug | Family | Line | Notes |
 |------|--------|------|-------|
-| `gemini-4-argon-medium` | `gemini` | argon | Default breadth reviewer |
+| `gemini-4-argon-medium` | `gemini` | argon | Not used: Gemini is never routed through Task; catalog fact only |
 | `claude-opus-5-5-medium` | `claude` | opus | Seat 0 and the integration stage |
 | `claude-sonnet-5-5-high` | `claude` | sonnet | |
 | `claude-fable-5-1-thinking-high` | `claude` | fable | |
@@ -15,6 +15,6 @@ What a Cursor session's **Task tool** offered on 2026-10-23, as reported by the 
 | `grok-4.7-medium` | `grok` | grok | Newer Grok; the resolver prefers it |
 | `muse-wonder-1.0-high` | none | | Not a Council family; ignored |
 
-**No Gemini Flash is offered**, so the second rewriter in the chain resolves to `no-line-match`; the first (Gemini 4 Argon) is offered, so the rewrite stage runs on Argon in Cursor. Claude Sonnet (the third) is offered as `claude-sonnet-5-5-high`.
+The default rewrite chain is Gemini Flash (api, then agy, via the shell), then Claude Sonnet (Task). **No Gemini Flash is offered by Task**, which does not affect Flash's shell routes. Gemini is never routed through Cursor/Task, including the Argon slug listed above. Claude Sonnet is offered as `claude-sonnet-5-5-high`.
 
 The initial draft is always the current chat model (or an Opus Task seat); it is not a catalog seat.

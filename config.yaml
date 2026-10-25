@@ -30,6 +30,8 @@ gemini_api:
   max_output_review: 32768
   max_output_rewrite: 65536
   max_model_steps: 2    # lower versions of the same line after 404/400-model/429/503
+  unavailable_retry_wait_sec: 20  # 503: wait (+0..2 s jitter), then retry the same model
+  unavailable_retries: 1
   # key_file: set in config.local.yaml; default ~/.council/gemini.key
 
 # runs_dir: config.local.yaml > this file > default ~/.council/runs

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import council_gemini_api as api
 import council_parse as cp
 from council_prompt import POINTER
-from council_resolve import classify_text
+from council_resolve import classify_text, parse_slug
 
 ROOT = Path(__file__).resolve().parent.parent
 REWRITE_TAIL = ('\n\nDo not use any tools or read any files. Output only the rewritten chunk '
@@ -68,8 +68,6 @@ def resolve_launcher(transport, which=shutil.which, platform=sys.platform, env=o
             if env.get('APPDATA') and script.is_file() and node:
                 return [node, str(script)], 'node'
             path = find('codex.ps1')
-    elif transport == 'grok':
-        path = find('agent')
     if not path:
         raise SeatError('not-found', f'{transport} launcher not found')
     if Path(path).suffix.lower() == '.ps1':
@@ -166,8 +164,7 @@ def build_argv(a, prefix, prompt, cwd, last):
                 + ['--skip-git-repo-check', '-C', str(a.root)] + additions + ['-m', a.model]
                 + (['-c', f'model_reasoning_effort="{a.effort}"'] if a.effort else [])
                 + ['-o', str(last), prompt])
-    return prefix + ['-p', prompt, '--model', a.model, '--permission-mode', 'plan',
-                     '--output-format', 'json', '--cwd', str(a.run), '--max-turns', '12']
+    raise SeatError('usage', 'unsupported CLI transport', 2)
 
 
 def parser():
@@ -180,7 +177,7 @@ def parser():
             s.add_argument('--reason', required=True)
             s.add_argument('--detail', default='')
         else:
-            s.add_argument('--transport', required=True, choices=('agy', 'cursor', 'codex', 'grok', 'api'))
+            s.add_argument('--transport', required=True, choices=('agy', 'cursor', 'codex', 'api'))
             s.add_argument('--root', default=str(ROOT))
             s.add_argument('--model', required=command == 'run')
             s.add_argument('--timeout', type=int)
@@ -240,6 +237,10 @@ def dispatch(a, key):
         return value
 
     try:
+        parsed_model = parse_slug(a.model) if a.model else None
+        if a.transport == 'cursor' and ((parsed_model and parsed_model['family'] == 'gemini')
+                                        or 'gemini' in (a.model or '').lower()):
+            raise SeatError('cursor-invalid-for-gemini', 'Gemini is never routed through Cursor', 2)
         if preflight and a.transport != 'api' and not a.model:
             raise SeatError('usage', '--model is required for CLI preflight', 2)
         if a.timeout is not None and not 30 <= a.timeout <= 3600:
@@ -261,7 +262,7 @@ def dispatch(a, key):
         if preflight:
             write(a.run / 'cli-preflight.txt', 'PREFLIGHT-OK', key)
             prompt = 'Reply with exactly: PREFLIGHT-OK'
-            if a.transport in ('grok', 'codex'):
+            if a.transport == 'codex':
                 prompt = f'Read {a.run / "cli-preflight.txt"} and reply with its contents.'
             if a.transport == 'codex':
                 probe = a.root / '.council-write-probe'
@@ -270,15 +271,17 @@ def dispatch(a, key):
                 prompt += f' Try to create {probe}. Answer WRITE-DENIED or WRITE-CREATED.'
             a.delivery, a.add_dir, a.effort = 'inline', [], None
         elif a.transport != 'api':
-            if a.transport in ('codex', 'grok') and a.delivery == 'inline':
+            if a.transport == 'codex' and a.delivery == 'inline':
                 raise SeatError('usage', 'transport requires pointer delivery', 2)
-            a.delivery = a.delivery or ('pointer' if a.transport in ('codex', 'grok') else 'inline')
+            a.delivery = a.delivery or ('pointer' if a.transport == 'codex' else 'inline')
             prompt_body = Path(a.prompt_file).read_text(encoding='utf-8-sig')
             prompt = POINTER.format(f=str(Path(a.prompt_file).resolve())) if a.delivery == 'pointer' else prompt_body
             if a.kind == 'rewrite':
                 prompt += REWRITE_TAIL
         if a.transport == 'api':
-            timeout = (a.timeout or api.read_config(a.root)['gemini_api']['timeout_sec']) + 120
+            settings = api.read_config(a.root)['gemini_api']
+            timeout = ((a.timeout or settings['timeout_sec']) + 120 if preflight
+                       else api.outer_timeout(settings, a.timeout))
             argv = [sys.executable, '-I', str(a.root / 'scripts/council_gemini_api.py'),
                     'preflight' if preflight else 'call', '--root', str(a.root)]
             meta['launcher'] = 'python'
@@ -365,7 +368,7 @@ def dispatch(a, key):
                 if data is None:
                     raise SeatError('unusable-stdout' if stdout.strip() else 'empty',
                                     'stdout is not a JSON object' if stdout.strip() else 'no reply text')
-                text = data.get({'agy': 'response', 'cursor': 'result', 'grok': 'text'}[a.transport], '')
+                text = data.get({'agy': 'response', 'cursor': 'result'}[a.transport], '')
                 result['usage'] = data.get('usage', {})
                 if a.transport == 'cursor' and data.get('is_error'):
                     raise SeatError(classify_text(str(text)), str(text))
@@ -387,7 +390,7 @@ def dispatch(a, key):
         category = getattr(exc, 'category', 'io')
         result.update(**{'class': category}, detail=detail(str(exc)))
         code = getattr(exc, 'code', 2)
-        if category in ('argv-too-long', 'usage'):
+        if category in ('argv-too-long', 'usage', 'cursor-invalid-for-gemini'):
             result['status'] = 'refused'
     finally:
         if stage is not None:
@@ -406,8 +409,11 @@ def dispatch(a, key):
     write(meta_path, json.dumps(clean(meta), ensure_ascii=False) + '\n', key)
     if result['status'] != 'ok' and result['class'] != 'usage':
         if preflight:
-            name = 'agent' if a.transport == 'grok' else a.transport
-            line = f'preflight ({a.transport}): cli-preflight-{name} ({result["class"]}: {result["detail"]})'
+            name = a.transport
+            token = ('cursor-invalid-for-gemini' if result['class'] == 'cursor-invalid-for-gemini' else
+                     'api-refused' if a.transport == 'api' and
+                     (result['status'] == 'refused' or result['class'] == 'config') else f'cli-preflight-{name}')
+            line = f'preflight ({a.transport}): {token} ({result["class"]}: {result["detail"]})'
         else:
             cls = str(result['class'])
             token = ('api-refused' if a.transport == 'api' and (result['status'] == 'refused' or cls == 'config')

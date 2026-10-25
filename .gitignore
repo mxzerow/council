@@ -8,3 +8,6 @@ last-exchange.md
 .DS_Store
 Thumbs.db
 __pycache__/
+
+# interrupted atomic writes of the local config (contain local settings)
+.council-stamp-*

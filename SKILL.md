@@ -57,7 +57,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 **Roster:** `seats:` (schema, strict `role` values, migration from the old keys: [core.md](core.md#roster-seats)). **Transport:** Gemini follows `gemini_transport` in the same way as Claude Code, every entry through the Shell tool (PowerShell on Windows): `agy`, `api` and `cursor` through `scripts/council_seat.py` (never Git Bash on Windows). Other families use Task. Do not shell out to `codex`, `grok` or `agent` from Cursor. Validate effective API settings with `council_gemini_api.py config`; core.md § Gemini transport defines strict validation and per-key local overrides.
 
-**Default roster:** reviewers Gemini Argon (`breadth-auditor`) → GPT Sol, then the rewriter chain Gemini Argon → Gemini Flash → Claude Sonnet (the first one the Task list offers does the rewrite; today that is Argon). Seat 0 and the integration stage are Opus (the chat model, or an Opus Task seat); they are stages, not roster entries.
+**Default roster:** reviewers Gemini Argon (`breadth-auditor`) → GPT Sol, then the rewriter chain Gemini Flash → Claude Sonnet (the first that works does the rewrite). Seat 0 and the integration stage are Opus (the chat model, or an Opus Task seat); they are stages, not roster entries.
 
 ## Start
 

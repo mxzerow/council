@@ -79,7 +79,7 @@ The orchestrator is always Claude (`family: claude`). **Any `claude`-family seat
 | `claude` | reviewers: skipped (same family). Rewriter: Agent-tool subagent, `model: sonnet` |
 | `composer` | none → skipped, `no-transport` |
 
-The default reviewers (Gemini Argon → GPT Sol) run as **Argon → Sol**, then the Opus integration stage, then the **rewriter chain** (Argon, then Flash, then Sonnet; the first that works does the rewrite). A rewriter is not a reviewer and is exempt from the skip.
+The default reviewers (Gemini Argon → GPT Sol) run as **Argon → Sol**, then the Opus integration stage, then the **rewriter chain** (Flash, then Sonnet; the first that works does the rewrite). A rewriter is not a reviewer and is exempt from the skip.
 
 ## Dispatch (Claude Code)
 
@@ -96,7 +96,7 @@ For each seat core.md says to dispatch:
 
 After integration, run core.md § Stages step 4 with the rewriter chain, in order, until one works:
 
-- **`gemini` rewriter (Argon, Flash):** follow `gemini_transport`, resolving with the selected transport's source. use council_seat.py run with the chunk prompt file, `--kind rewrite --stem rewrite/chunk-<i>` and the chunk reply path. The runner appends the tail; API keeps its own thinking setting (no seat effort override). Fix transport/model after chunk 1 succeeds; on later seat failure or exhausted API budget, `prepare` again and restart on the next transport/model before trying another rewriter. See core.md § Gemini transport for the one-voice and total-call rules.
+- **`gemini` rewriter (Flash):** follow `gemini_transport`, resolving with the selected transport's source. use council_seat.py run with the chunk prompt file, `--kind rewrite --stem rewrite/chunk-<i>` and the chunk reply path. The runner appends the tail; API keeps its own thinking setting (no seat effort override). Fix transport/model after chunk 1 succeeds; on later seat failure or exhausted API budget, `prepare` again and restart on the next transport/model before trying another rewriter. See core.md § Gemini transport for the one-voice and total-call rules.
 - **`claude` rewriter (Sonnet):** dispatch the `general-purpose` agent with `model: sonnet` and a file-based brief: read `rewrite/chunk-<i>-prompt.md`, write the rewritten chunk plus the final `REWRITE_END` line to `rewrite/chunk-<i>-reply.txt`, reply `DONE`. This uses no CLI quota, so it still works when `agy` is out. Save nothing yourself unless the file is missing.
 - Then `council_rewrite.py check` the reply file. Move down the chain only for the seat-level failures listed in core.md.
 

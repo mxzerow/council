@@ -7,7 +7,7 @@ A sequential **multi-model review** for [Cursor](https://cursor.com) and [Claude
 1. **Draft (seat 0).** Opus writes the draft, or you supply one.
 2. **Review, gaps only.** Reviewers from other model families (default: Gemini Argon, then GPT Sol) each read the draft and report gaps. They never rewrite it.
 3. **Integrate, once.** Opus resolves every gap (accept or reject with a reason) and writes the revision. Anything it rejects is printed at the end, with its reason.
-4. **Rewrite, once.** A writer model polishes the result for a reader who is not a specialist, in small chunks, adding short explanations of jargon. The writers are an ordered fallback chain (default: Gemini Argon, then Gemini Flash, then Claude Sonnet); the first that works does the whole rewrite. A script checks every chunk and keeps the original wording of any chunk that fails.
+4. **Rewrite, once.** A writer model polishes the result for a reader who is not a specialist, in small chunks, adding short explanations of jargon. The writers are an ordered fallback chain (default: Gemini Flash, then Claude Sonnet); the first that works does the whole rewrite. A script checks every chunk and keeps the original wording of any chunk that fails.
 
 There is no parallel first-answers pass and no chairman synthesis. See [`core.md`](core.md#stages).
 

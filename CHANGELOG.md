@@ -13,6 +13,12 @@ PR (not backfilled later). One entry per PR, dated by merge date, using
 `Added` / `Changed` / `Fixed` / `Removed` sections as needed. Skip trivial
 wording fixes that don't change behavior.
 
+## 2026-10-25 — Default rewriter chain is Flash, then Sonnet
+
+### Changed
+
+- `config.yaml` no longer lists Gemini Argon as a rewriter. Rewriting is mechanical; Argon is reserved for the breadth review. The chain is Gemini Flash (low effort), then Claude Sonnet. README, `core.md` and both `SKILL.md` files updated to match.
+
 ## 2026-10-25 - Cross-platform seat runner
 
 ### Added

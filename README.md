@@ -183,9 +183,13 @@ The scripts are what keeps the model-written parts honest: replies are parsed an
 
 ## Status
 
-Verified live in Claude Code on 2026-10-23 (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite). Cursor's own agent read the skill and reported READY WITH FIXES (fixed since): the Task tool offers Gemini 4 Argon, Claude Opus 5.5 and GPT-5.6 Sol but **no Gemini Flash**, so in Cursor the rewrite runs on Gemini 4 Argon, first in the rewriter chain. Task seats writing their reply to a file, and shell access for the scripts outside plan mode, have not been exercised yet; the first real Cursor run is the check.
+Verified live on 2026-10-23 in Claude Code (a full run: Gemini Argon, GPT Sol, Opus integration, Gemini Flash rewrite) and on 2026-10-25 in Cursor's own agent (three full runs on a synthetic doc). In the last Cursor run, with gemini_transport: [api, cursor, agy] and a free-tier API key:
 
-The opt-in Gemini API lane was verified live on 2026-10-24 with a free-tier key (`gemini-3.8-flash`, one real call, about 120 s) and reviewed against a fake server for key leaks (no leaks in 20 attack cases). It has not yet been run as part of a full council run, on the paid tier, or from a Cursor cloud agent.
+- Argon was refused by the free API tier (429), fell through to cursor-agent, and reviewed in 43 s; the rewrite also ran on cursor-agent (about 35 s a chunk, one chunk retried after a failed check).
+- In the run before it, Gemini Flash rewrote through the free API (about 200 s for a chunk).
+- GPT Sol and the Opus integration ran through Task; ailures.md was written by council_seat.py and no ad-hoc wrapper scripts were created.
+
+Not yet verified: a Cursor cloud agent, the paid API tier, whether stripping MSYSTEM fixes the Cursor hook bug when cursor-agent is launched from Git Bash, and POSIX (macOS/Linux) execution of the runner (the code and its tests are written for it but ran on Windows only).
 
 ## Run data
 

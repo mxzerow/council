@@ -226,6 +226,20 @@ class SeatTests(unittest.TestCase):
                 self.assertEqual('cursor-ps51' in json.dumps(data), expected)
                 self.assertFalse((self.run / 'failures.md').exists())
 
+    def test_failures_log_error_never_hides_the_seat_summary(self):
+        with patch.object(seat.cp, 'log_failure', side_effect=PermissionError('lock held')):
+            code, data = self.invoke('import sys; sys.stderr.write("boom"); sys.exit(3)')
+        self.assertEqual(code, 1)
+        self.assertEqual(data['status'], 'failed')
+        self.assertEqual(data['failures_log_error'], 'PermissionError')
+
+    def test_failure_token_does_not_repeat_the_transport(self):
+        with patch.object(seat, 'execute', side_effect=seat.SeatError('cursor-hook-bug', 'x')):
+            code, data = self.invoke('', 'cursor')
+        self.assertEqual(code, 1)
+        self.assertIn(': cursor-hook-bug [cursor m]', self.failures())
+        self.assertNotIn('cursor-cursor', self.failures())
+
     def test_concurrent_failure_appends_keep_every_line(self):
         worker = self.root / 'append_worker.py'
         # Release both independent processes together to exercise the append race.

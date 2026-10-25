@@ -409,9 +409,14 @@ def dispatch(a, key):
             name = 'agent' if a.transport == 'grok' else a.transport
             line = f'preflight ({a.transport}): cli-preflight-{name} ({result["class"]}: {result["detail"]})'
         else:
-            token = 'api-refused' if a.transport == 'api' and (result['status'] == 'refused' or result['class'] == 'config') else f'{a.transport}-{result["class"]}'
+            cls = str(result['class'])
+            token = ('api-refused' if a.transport == 'api' and (result['status'] == 'refused' or cls == 'config')
+                     else cls if cls.startswith(a.transport + '-') else f'{a.transport}-{cls}')
             line = f'seat {a.seat} ({a.label}): {token} [{a.transport} {a.model}] ({result["detail"]})'
-        cp.log_failure(str(a.run), safe(' '.join(line.split())))
+        try:
+            cp.log_failure(str(a.run), safe(' '.join(line.split())))
+        except OSError as exc:  # e.g. failures.md lock held too long: never lose the seat's own summary
+            result['failures_log_error'] = exc.__class__.__name__
     if preflight:
         result = {name: result[name] for name in ('status', 'class', 'transport', 'seconds', 'detail', 'warning') if name in result}
         result.update(version=version, launcher=meta['launcher'])

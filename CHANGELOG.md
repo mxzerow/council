@@ -28,6 +28,13 @@ wording fixes that don't change behavior.
 
 - Windows-only Invoke-Seat / Stop-Tree helpers and hand-built process-launch recipes.
 
+## 2026-10-25 — Seat runner follow-ups
+
+### Fixed
+
+- `council_seat.py` no longer loses a seat's own summary when `failures.md` is locked (it reports `failures_log_error` instead), and failure tokens no longer repeat the transport (`cursor-hook-bug`, not `cursor-cursor-hook-bug`).
+- The Cursor hook bug was reproduced (`MSYSTEM` plus a tool call) and confirmed absent without `MSYSTEM`; the runner's `MSYSTEM` strip is kept as belt and braces, since council seats make no tool calls.
+
 ## 2026-10-24 — Cursor routes Gemini through the shell
 
 ### Changed

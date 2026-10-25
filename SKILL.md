@@ -29,7 +29,7 @@ Never pass unresolved `~` into Shell or Task prompts. Expand it first.
 
 ## Platform (Cursor cloud agents, Linux, macOS)
 
-This skill's paths are written Windows-style (`<run>\file`). On Linux or macOS, including Cursor cloud agents, use forward slashes and the real `~`. If `python` is not found, use `python3` for the scripts. Gemini seats go through the shell (`agy`, the API helper, `cursor-agent`), other families through Task. A cloud agent has no `agy` or `cursor-agent` and, in a project copy, no recipes, so those transports fail preflight and are skipped; the API helper works there with the key in the `COUNCIL_GEMINI_API_KEY` secret, never a committed config or key file. If no Gemini transport works, the Gemini seat is skipped. In a cloud run the skill must be in the repo's `.cursor/skills/council/` (see the README) or synced; run data is created under `~/.council/runs` on that machine and is not kept after the run.
+This skill's paths are written Windows-style (`<run>\file`). On Linux or macOS, including Cursor cloud agents, use forward slashes and the real `~`. If `python` is not found, use `python3` for the scripts. Gemini seats go through the shell (`agy`, the API helper, `cursor-agent`), other families through Task. A cloud agent has no `agy` or `cursor-agent`, so the runner logs their failed preflights and skips those transports; the API helper works there with the key in the `COUNCIL_GEMINI_API_KEY` secret, never a committed config or key file. If no Gemini transport works, the Gemini seat is skipped. In a cloud run the skill must be in the repo's `.cursor/skills/council/` (see the README) or synced; run data is created under `~/.council/runs` on that machine and is not kept after the run.
 
 ## Config defaults
 
@@ -55,7 +55,7 @@ Read from [config.yaml](config.yaml). If a key is missing, use:
 
 `max_reviewers`, `run_retention_count` and `run_retention_days` must be positive integers; on invalid values stop and ask the user to fix or reconfigure. If `seats` is longer than `max_reviewers`, warn and use the first N seats.
 
-**Roster:** `seats:` (schema, strict `role` values, migration from the old keys: [core.md](core.md#roster-seats)). **Transport:** Gemini follows `gemini_transport` in the same way as Claude Code, every entry through the Shell tool (PowerShell on Windows): `agy` per `recipes/agy.md`, `api` via the Python helper, `cursor` per `recipes/cursor.md` (`pwsh -File`, never Git Bash). Other families use Task. Do not shell out to `codex`, `grok` or `agent` from Cursor. Validate effective API settings with `council_gemini_api.py config`; core.md § Gemini transport defines strict validation and per-key local overrides.
+**Roster:** `seats:` (schema, strict `role` values, migration from the old keys: [core.md](core.md#roster-seats)). **Transport:** Gemini follows `gemini_transport` in the same way as Claude Code, every entry through the Shell tool (PowerShell on Windows): `agy`, `api` and `cursor` through `scripts/council_seat.py` (never Git Bash on Windows). Other families use Task. Do not shell out to `codex`, `grok` or `agent` from Cursor. Validate effective API settings with `council_gemini_api.py config`; core.md § Gemini transport defines strict validation and per-key local overrides.
 
 **Default roster:** reviewers Gemini Argon (`breadth-auditor`) → GPT Sol, then the rewriter chain Gemini Argon → Gemini Flash → Claude Sonnet (the first one the Task list offers does the rewrite; today that is Argon). Seat 0 and the integration stage are Opus (the chat model, or an Opus Task seat); they are stages, not roster entries.
 
@@ -89,13 +89,36 @@ The integration and rewrite stages are **not** reviews, so they are never skippe
 
 This is the only logic that differs from Claude Code. For each seat core.md says to dispatch:
 
-**Gemini branch (shell):** walk the configured chain; Task is not used for Gemini. Read `recipes/common.md` and, for each transport the run uses, `recipes/agy.md` or `recipes/cursor.md`; run that transport's preflight before its first seat (a missing CLI or recipe skips only that transport). Prompts, preflight, empty working directory and failure handling are exactly as in `claude/SKILL.md` § Dispatch. For `api`, require enabled and successful `python -I <shared>/scripts/council_gemini_api.py preflight --root <shared>`; failure logs `cli-preflight-api` and skips only this transport. Resolve with `--source api`. Build reviews with `council_prompt.py build ... --mode inline`; dispatch via Shell:
+**Gemini branch (shell):** walk the configured transport chain; Task is not used for Gemini. The script holds the dispatch logic in both personal and project copies; recipes are optional setup and measurement notes.
+
+Use `scripts/council_seat.py`. Do not write ad-hoc wrapper scripts.
+Failures are logged to failures.md by the script.
+
+Before a transport's first seat, run its preflight (use the first resolved model for agy/cursor; api needs no model):
 
 ```text
-python -I <shared>/scripts/council_gemini_api.py call --root <shared> --model <slug> --prompt-file <run>/seat-<n>-prompt.md --out <run>/seat-<n>-reply.txt
+python -I <shared>/scripts/council_seat.py preflight --transport agy --root <shared> --run <run> --model <slug>
+python -I <shared>/scripts/council_seat.py preflight --transport cursor --root <shared> --run <run> --model <slug>
+python -I <shared>/scripts/council_seat.py preflight --transport api --root <shared> --run <run>
 ```
 
-Read only its one-line JSON summary; record it in `seat-<n>-argv-meta.txt`, capture stderr separately, and parse the reply file on success. Surface the free-tier warning once per run. Apply core.md's API failure table (including exclusions, one-day unavailable cooldown, bounded model steps, full timeout, no timeout downgrade, and total call cap). Use Shell's background completion facility for long calls; do not poll or terminate early. For rewrite chunks, save the chunk prompt plus the rewrite tail in a file and add `--kind rewrite`. Do not pass seat effort to the helper. Freeze model/transport after chunk 1 succeeds; on later seat failure, `prepare` and restart on the next transport/model. Recipes are not installed into project copies; these instructions plus core.md are sufficient. If a transport is exhausted/unavailable, advance to the next entry; with none left the seat is skipped. The numbered Task steps below apply to non-Gemini seats.
+A failed preflight skips only that transport. Resolve using its source (`agy|cursor|api`). Build review prompts with council_prompt.py (role and total included); API always uses `--mode inline`. Translate builder `mode: file` to `--delivery pointer` for agy/cursor, otherwise use inline (the default). Dispatch via Shell:
+
+```text
+python -I <shared>/scripts/council_seat.py run --transport agy --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <run>/seat-<n>-prompt.md --reply <run>/seat-<n>-reply.txt --delivery inline
+python -I <shared>/scripts/council_seat.py run --transport cursor --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <run>/seat-<n>-prompt.md --reply <run>/seat-<n>-reply.txt --delivery inline
+python -I <shared>/scripts/council_seat.py run --transport api --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <run>/seat-<n>-prompt.md --reply <run>/seat-<n>-reply.txt
+```
+
+For agy pointer delivery, add repeated `--add-dir <review-root>`; shared root and run are granted automatically. The runner handles empty cwd, safe launchers, closed stdin, whole-tree hard timeout, stdout/stderr/meta and prompt/key redaction. Read its one-line JSON summary; exit 0 means parse the reply, 1 is seat failure, 2 is usage/IO/refusal. Surface `free_tier_warning` once per run. Apply core.md's two-dispatch rule and API failure table, model exclusions, cooldowns, call cap and full timeout. The runner never retries or resolves a model. Use Shell's background completion facility for long calls, allowing the API's outer timeout plus 120 s; do not poll or terminate early.
+
+For rewrite chunks use the selected transport command with `--prompt-file <run>/rewrite/chunk-<i>-prompt.md --reply <run>/rewrite/chunk-<i>-reply.txt --kind rewrite --stem rewrite/chunk-<i>`; the runner appends the tail (and saves the API prompt). Do not pass seat effort to API. Freeze model/transport after chunk 1 succeeds; a later seat failure restarts prepare on the next transport/model. With no transport left, skip the seat. Record all orchestrator skips via:
+
+```text
+python -I <shared>/scripts/council_seat.py skip --run <run> --seat <n> --label <label> --reason no-transport --detail <reason>
+```
+
+Use the actual skip reason, such as same-model or rejected-family. Do not duplicate runner or parser failure lines. The numbered Task steps below apply to non-Gemini seats.
 
 1. **Resolve the model** per [Model resolution](#model-resolution-cursor). If it returns `skip`, skip the seat (`rejected-family`).
 2. **Prompt:** write `seat-<n>-prompt.md` as core.md's Cascade loop step 3 says (fields, packet paths, the inlined `reviewer-envelope.md`, and that the seat is gaps only). The Task prompt itself is a short pointer: read that file, then write the envelope to `<run>\seat-<n>-reply.txt`. Do **not** paste `artifact.md` or skill file bodies into the Task prompt.

@@ -32,6 +32,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 
 SENT = {
@@ -147,7 +148,31 @@ def render_all(run, st):
 
 def log_failure(run, line):
     p = os.path.join(run, "failures.md")
-    write(p, read(p) + line + "\n")
+    data = (line + "\n").encode("utf-8")
+    if sys.platform != "win32":
+        # O_APPEND and a single write preserve concurrent records on POSIX.
+        with open(p, "ab", buffering=0) as f:
+            f.write(data)
+        return
+    import msvcrt
+    # Windows append positioning needs serialization across processes. Keep the
+    # lock file in place: unlinking it would let writers lock different files.
+    with open(p + ".lock", "a+b") as lock:
+        for attempt in range(200):
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if attempt == 199:
+                    raise
+                time.sleep(0.01)
+        try:
+            with open(p, "ab", buffering=0) as f:
+                f.write(data)
+        finally:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def must_dir(run):

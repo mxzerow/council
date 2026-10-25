@@ -23,7 +23,7 @@ There is no parallel first-answers pass and no chairman synthesis. See [`core.md
 | Fallback for `gemini` seats | Cursor's CLI (`cursor-agent login`): used when `agy` is out of quota; spends Cursor usage |
 | Cursor | Task for non-Gemini families. Gemini seats use the shell like Claude Code (`agy`, the API helper, `cursor-agent`), so those need to be installed on the same machine |
 
-Recipes for calling each CLI are written for PowerShell on Windows ([`recipes/`](recipes/)).
+The seat runner works on Windows, macOS and Linux with Python 3.10+ (standard library only). PowerShell is needed only for cursor-agent on Windows (and as a fallback for a Codex .ps1 launcher). [`recipes/`](recipes/) hold setup and transport notes; `scripts/council_seat.py` holds dispatch logic.
 
 ## Choosing how Gemini is called
 
@@ -170,7 +170,7 @@ Machine-specific overrides go in `config.local.yaml` (gitignored; see [`config.l
 | [`catalog.md`](catalog.md) | Cursor Task model reference |
 | [`recipes/`](recipes/) | Transport recipes (`common`, `agy`, `api`, `cursor`, `codex`, `grok`) |
 | [`partitioning.md`](partitioning.md) | What to do when the input is too big for one cascade |
-| [`scripts/`](scripts/) | `council_parse.py` (reply parser/state), `council_resolve.py` (newest model version), `council_rewrite.py` (safe chunked rewrite), `council_prompt.py` (seat prompts), `council_gemini_api.py` (opt-in API lane) |
+| [`scripts/`](scripts/) | `council_parse.py` (reply parser/state), `council_resolve.py` (newest model version), `council_rewrite.py` (safe chunked rewrite), `council_prompt.py` (seat prompts), `council_gemini_api.py` (opt-in API lane), `council_seat.py` (cross-platform dispatch, preflight and failure logging) |
 | [`recipes/api.md`](recipes/api.md) | API key setup pointer, tiers/timeouts, failures and rewrite calls |
 
 ## Tests

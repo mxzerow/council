@@ -1,26 +1,23 @@
 # Fallback lane: Cursor's CLI (`cursor-agent`)
 
-Cursor's CLI can run the same models Council uses (Gemini Argon and Flash, Claude, GPT, Grok) on **Cursor's** quota. Use it when a seat's own CLI cannot run: `agy` out of quota, signed out, or unavailable. Common rules and the `Invoke-Seat` helper: [common.md](common.md). Tested live 2026-10-23 for `gemini` seats only; other families are plausible but untested.
+```text
+python -I <shared>/scripts/council_seat.py preflight --transport cursor --root <shared> --run <run> --model <slug>
+python -I <shared>/scripts/council_seat.py run --transport cursor --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <prompt-file> --reply <reply-file>
+```
+
+Cursor's CLI can run the same models Council uses (Gemini Argon and Flash, Claude, GPT, Grok) on **Cursor's** quota. Use it when a seat's own CLI cannot run: `agy` out of quota, signed out, or unavailable. Common runner rules: [common.md](common.md). Tested live 2026-10-23 for `gemini` seats only; other families are plausible but untested.
 
 - **Catalog:** `python -I scripts/council_resolve.py resolve ... --source cursor` (runs `cursor-agent --list-models`, about 265 models). This is the CLI's list, **not** the shorter list a Cursor *Task* seat is offered.
 - **Sign-in:** in a normal terminal, `cursor-agent login`. Never paste credentials into chat.
-- **Windows:** `cursor-agent` is a PowerShell script (`cursor-agent.ps1`), which a plain process launch cannot run, so call it through `pwsh -File`. Use the PowerShell tool, not Git Bash: Git Bash sets `MSYSTEM`, and Cursor's hook importer then breaks every call (see the project note on the Cursor CLI hook bug).
+- **Windows:** `cursor-agent` is a PowerShell script (`cursor-agent.ps1`), which a plain process launch cannot run, so the runner launches it through PowerShell. Use the PowerShell tool, not Git Bash: Git Bash sets `MSYSTEM`, and Cursor's hook importer then breaks every call (see the project note on the Cursor CLI hook bug).
 
-## Invoke (one call, no tools)
+## Calls
 
-```powershell
-$cur   = (Get-Command cursor-agent).Source                       # ...\cursor-agent.ps1
-$empty = "$runsDir\_cwd"                                         # empty working directory
-$tokens = @('-NoProfile','-File',$cur,'-p',$prompt,'--model',$slug,'--output-format','json',
-            '--mode','ask','--trust','--workspace',$empty)
-$r = Invoke-Seat (Get-Command pwsh).Source $tokens ($timeoutSec * 1000) $outFile $errFile $empty
-```
+The runner sends the builder's inline prompt (or pointer delivery) using ask mode and an empty workspace. For rewrites add `--kind rewrite --stem rewrite/chunk-<i>` with the chunk prompt file. It extracts `.result`, records `.usage`, and treats `.is_error: true` as failure. Preflight requires `PREFLIGHT-OK` and exit 0. Authentication/model failures use the common classes.
 
-- `$prompt` is the **inline** prompt from `council_prompt.py build` (or a rewrite chunk prompt plus its tail), exactly as for `agy`.
-- `--mode ask` is read-only question answering; the seat edits nothing. `--workspace` is the empty folder, so there is nothing to scan.
-- The reply is JSON: take `.result` (the parsers unwrap it); usage is in `.usage.inputTokens` / `.outputTokens`; `.is_error` is true on failure.
-- **Preflight (`cli-preflight-cursor`):** a prompt `Reply with exactly: OK` must return `result` = `OK` with exit 0.
-- **Failure classes:** as in common.md; also `not logged in` (run `cursor-agent login`), and a model slug not in the CLI's list.
+On Windows cursor-agent.ps1 is launched through PowerShell by the script. Never run cursor-agent from Git Bash: MSYSTEM triggers the documented hook-import bug. The runner strips MSYSTEM on Windows; that mitigation remains unverified live.
+
+The runner prefers `pwsh`. When only Windows PowerShell 5.1 is available, the summary includes a `cursor-ps51` warning: embedded double quotes in prompts may be garbled by node-based launchers. Install PowerShell 7 (`pwsh`) for reliable argument forwarding; the runner keeps the same argv quoting and permission settings.
 
 ## Measured (2026-10-23, same packets as the `agy` trials)
 

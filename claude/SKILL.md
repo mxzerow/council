@@ -67,7 +67,7 @@ Shared: core.md § Produce the draft (seat 0), § Run folder.
 
 ## Same-model skip (Claude Code)
 
-The orchestrator is always Claude (`family: claude`). **Any `claude`-family seat is skipped automatically** — append to `failures.md`, one line to the user, continue. Applies to the final roster for the run, default or overridden.
+The orchestrator is always Claude (`family: claude`). **Any `claude`-family seat is skipped automatically** — run `council_seat.py skip --run <run> --seat <n> --label <label> --reason same-model`, one line to the user, continue. Applies to the final roster for the run, default or overridden.
 
 **Transport mapping:**
 
@@ -85,18 +85,18 @@ The default reviewers (Gemini Argon → GPT Sol) run as **Argon → Sol**, then 
 
 For each seat core.md says to dispatch:
 
-1. Build the seat prompt with `council_prompt.py build` (core.md § Cascade loop, step 3): API always `--mode inline`; other lanes inline when it fits, file mode when not. Run `agy` from the empty working directory `<runs_dir>\_cwd`.
-2. Run the selected transport recipe (`recipes/agy.md`, `recipes/api.md`, `recipes/cursor.md`, `recipes/codex.md` or `recipes/grok.md`, built on `recipes/common.md`). Before the first seat of each transport, run its preflight. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-api`, `cli-preflight-codex`); the others still run. Gemini follows core.md § Gemini transport, including API classes and bounded model steps.
-3. Save the raw reply to `seat-<n>-<slug>.md` (Codex: the fresh `-o` file) and run the parser; read only its JSON summary (core.md § Envelope parser). On exit 3 or 4 retry once, then re-run with `--final-attempt`; never a third dispatch.
+1. Build the seat prompt with `council_prompt.py build` (core.md § Cascade loop, step 3): API always `--mode inline`; other lanes inline when it fits, file mode when not. The runner creates and uses the empty working directory `<runs_dir>/_cwd` for CLI calls.
+2. Run `python -I <shared>/scripts/council_seat.py run --transport <agy|api|cursor|codex|grok> --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <prompt-file> --reply <run>/seat-<n>-<slug>.md`. Translate builder file mode to `--delivery pointer` (mandatory for codex/grok); otherwise inline is the default. Add `--effort` for Codex and repeated `--add-dir` for review roots where needed. Before the first seat of each transport, run `council_seat.py preflight --transport T --root <shared> --run <run> --model <slug>` (API needs no model). Recipes remain setup and measurement notes. A failure skips remaining seats of **that** transport only (`cli-preflight-agent`, `cli-preflight-agy`, `cli-preflight-api`, `cli-preflight-codex`); the others still run. Gemini follows core.md § Gemini transport, including API classes and bounded model steps.
+3. The runner writes the extracted reply atomically to `--reply` only on success (Codex checks the fresh `-o` file). Read its one-line JSON summary, then run the parser; read only its JSON summary (core.md § Envelope parser). On exit 3 or 4 retry once, then re-run with `--final-attempt`; never a third dispatch.
 4. If `role: breadth-auditor` minted blocking gaps, later seats must STATUS them (the parser enforces this).
 
-**API long calls:** the shell foreground limit is 600 s. If call timeout + 60 s > 540 s (always with the default free timeout), run the PowerShell `call` tool invocation with `run_in_background: true`, then continue on its completion notification. Never poll or `sleep`. Otherwise use foreground tool timeout `(timeout + 60) * 1000` ms. The Python script enforces its socket timeout; do not kill a slow call early or downgrade because of latency. Record its one-line JSON summary (no key) in `seat-<n>-argv-meta.txt`; capture stderr separately and surface the free-tier reminder once per run.
+**Long calls:** give the foreground tool timeout `(timeout + 120) * 1000` ms. When timeout + 120 s exceeds 540 s, run the `council_seat.py` invocation with `run_in_background: true`, then continue on its completion notification. Never poll or `sleep`. The runner enforces its hard timeout, including the API subprocess allowance; do not kill a slow call early or downgrade because of latency. The runner records the API summary in argv-meta and captures stderr; surface free_tier_warning once per run. Use council_seat.py for all CLI/API calls; never write ad-hoc wrapper scripts. It logs run/preflight failures itself; use council_seat.py skip for orchestrator skips and do not duplicate parser logs.
 
 ### Rewrite stage
 
 After integration, run core.md § Stages step 4 with the rewriter chain, in order, until one works:
 
-- **`gemini` rewriter (Argon, Flash):** follow `gemini_transport`, resolving with the selected transport's source. `agy` uses one inline chunk call with `--output-format json`; `api` uses the chunk plus rewrite tail via a prompt file and `--kind rewrite` (no seat effort override); `cursor` follows its recipe. Fix transport/model after chunk 1 succeeds; on later seat failure or exhausted API budget, `prepare` again and restart on the next transport/model before trying another rewriter. See core.md § Gemini transport for the one-voice and total-call rules.
+- **`gemini` rewriter (Argon, Flash):** follow `gemini_transport`, resolving with the selected transport's source. use council_seat.py run with the chunk prompt file, `--kind rewrite --stem rewrite/chunk-<i>` and the chunk reply path. The runner appends the tail; API keeps its own thinking setting (no seat effort override). Fix transport/model after chunk 1 succeeds; on later seat failure or exhausted API budget, `prepare` again and restart on the next transport/model before trying another rewriter. See core.md § Gemini transport for the one-voice and total-call rules.
 - **`claude` rewriter (Sonnet):** dispatch the `general-purpose` agent with `model: sonnet` and a file-based brief: read `rewrite/chunk-<i>-prompt.md`, write the rewritten chunk plus the final `REWRITE_END` line to `rewrite/chunk-<i>-reply.txt`, reply `DONE`. This uses no CLI quota, so it still works when `agy` is out. Save nothing yourself unless the file is missing.
 - Then `council_rewrite.py check` the reply file. Move down the chain only for the seat-level failures listed in core.md.
 
@@ -114,7 +114,7 @@ Shared: core.md § Return. If the full exchange was requested, append the transc
 
 1. Show what the live catalogs offer with `python -I scripts/council_resolve.py list --source agy|api|cursor|codex|grok [--family F]`.
 2. Ask seat count (minimum 1), then for each seat in order: `family`, `line`, `effort`, optional `role`. GPT is dispatched through the **Codex CLI** here.
-3. Probe **that seat's transport** (its recipe's preflight) before accepting (`agy` vs `codex` vs Grok CLI independently). On failure, ask whether to keep it anyway or pick something else. Default `role: breadth-auditor` for the first Gemini seat.
+3. Probe **that seat's transport** (council_seat.py preflight) before accepting (`agy` vs `codex` vs Grok CLI independently). On failure, ask whether to keep it anyway or pick something else. Default `role: breadth-auditor` for the first Gemini seat.
 4. Ask whether to persist (writes the shared `config.yaml`) and the `show_exchange` default.
 5. If persisted, add an entry to `CHANGELOG.md` (dated, `Changed`/`Added`/`Removed` as fits) — shared with Cursor's sibling and the only consumer-facing record of what changed. Skip only for a reconfigure that changes nothing observable.
 6. Run the cascade unless they chose reconfigure-only.

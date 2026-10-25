@@ -13,6 +13,21 @@ PR (not backfilled later). One entry per PR, dated by merge date, using
 `Added` / `Changed` / `Fixed` / `Removed` sections as needed. Skip trivial
 wording fixes that don't change behavior.
 
+## 2026-10-25 - Cross-platform seat runner
+
+### Added
+
+- Standard-library Python 3.10+ `council_seat.py`: one dispatch, preflight or logged skip for agy, Cursor, Codex, Grok and the Gemini API, on Windows/macOS/Linux. Safe launcher resolution, closed stdin, file-backed output, whole-tree timeouts, empty cwd, prompt hashes, key redaction and atomic success-only replies.
+- Offline fake-CLI tests for transport results, argv, launchers, timeouts, redaction and failure logging; the installer includes the new runtime script.
+
+### Changed
+
+- Both harnesses and all recipes use the runner. Failures are logged exactly once by code; the harness still owns retries, model resolution and API fallback. Project copies need no recipes.
+
+### Removed
+
+- Windows-only Invoke-Seat / Stop-Tree helpers and hand-built process-launch recipes.
+
 ## 2026-10-24 — Cursor routes Gemini through the shell
 
 ### Changed

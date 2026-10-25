@@ -1,5 +1,10 @@
 # Gemini Developer API (opt-in Python transport)
 
+```text
+python -I <shared>/scripts/council_seat.py preflight --transport api --root <shared> --run <run>
+python -I <shared>/scripts/council_seat.py run --transport api --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <prompt-file> --reply <reply-file>
+```
+
 This is a direct REST call using your own API key, quota and billing, independent of `agy` and Cursor. Python 3.10+; standard library only; always run with `python -I`. Enable it and choose its position in `gemini_transport` through `config.local.yaml`. Defaults keep it disabled. Key-file setup and privacy comparison: [README, Choosing how Gemini is called](../README.md#choosing-how-gemini-is-called).
 
 ## Preflight and config
@@ -14,17 +19,11 @@ python -I "$shared\scripts\council_gemini_api.py" models --root $shared
 
 The key is loaded from `COUNCIL_GEMINI_API_KEY`, then the effective `gemini_api.key_file`, then `~/.council/gemini.key`. There is no `--key` flag. Key files accept UTF-8 (with or without BOM) and BOM-marked UTF-16 LE/BE, contain one key line, and must match letters/digits/underscore/hyphen/dot (at least 20 characters). POSIX files must have no group/other permissions (`chmod 600`). Windows ACLs are documented in the README; the script never checks or changes them. The endpoint is fixed to `https://generativelanguage.googleapis.com/v1beta`; no endpoint flag or environment override is accepted, and redirects are refused. The key goes only in `x-goog-api-key`, never the URL. Errors are redacted and limited to 300 characters.
 
-## Review call (PowerShell)
+## Review call
 
-```powershell
-python -I "$shared\scripts\council_resolve.py" resolve --family gemini --line flash --source api --state "$runsDir\_resolved.json"
-python -I "$shared\scripts\council_prompt.py" build --run $run --seat $n --label $label --family gemini --mode inline
-python -I "$shared\scripts\council_gemini_api.py" call --root $shared --model $slug --prompt-file "$run\seat-$n-prompt.md" --out "$run\seat-$n-$slug.md"
-```
+Resolve with `council_resolve.py resolve --family gemini --line flash --source api --state <runs_dir>/_resolved.json`. Build reviews with `council_prompt.py build --run <run> --seat <n> --label <label> --family gemini --mode inline`, supplying role and total. Use council_seat.py run above as the dispatch entry point; it delegates to council_gemini_api.py and keeps stdout/stderr/meta itself. Never put prompt text in argv.
 
-Supply the seat's `--role` and `--total` when building its prompt. The API has no tools: always use `--mode inline`, regardless of packet length. The prompt text is read from a file, never put in argv. Read only the JSON summary; the reply is saved atomically as UTF-8 on success. Existing output stays untouched on failure. Thought parts are discarded. Record the summary in `seat-<n>-argv-meta.txt`, capture stderr separately, then feed the reply file to the envelope parser.
-
-Summary fields: `status` (`ok|failed|refused`), `class`, `model`, `http` (code or null), `usage` (`prompt`, `thoughts`, `output`, `total`), `finish_reason`, `seconds`, `tier`, `max_output`, `detail` (redacted, at most 300 characters or null). Exit 0 means success, 1 means API failure, 2 means usage/IO/config/refusal. Never log headers or secrets. On success `mark-good` the slug.
+Read only the runner's one-line summary and parse its reply file on success. The API summary (status/class, HTTP, usage, finish reason, seconds, tier, maximum output, detail) is retained in argv-meta. Reply files stay untouched on failure. Surface free_tier_warning once per run. On success mark-good the slug.
 
 The API uses `gemini_api.thinking_level` (default `high`), independent of the seat's effort. Do not forward the seat effort. An explicit API `--effort low|medium|high` overrides the config; `minimal` is invalid. It sends `generationConfig.thinkingConfig.thinkingLevel`; `includeThoughts` is not set. Reviews default to 32768 output tokens; rewrites to 65536. `--max-output` explicitly overrides with a positive integer, clamped to `outputTokenLimit` from a model GET before generation; config caps must be 1024..65536. No token optimisation or `service_tier` is sent. `service_tier` is a possible future option once verified for this endpoint.
 
@@ -38,7 +37,7 @@ Free refuses unless `free_tier_ack: true`. A free invocation prints exactly one 
 council: Gemini API free tier - Google may use prompts and replies to improve its products and humans may review them; do not send PHI or confidential text.
 ```
 
-Capture this stderr and show the reminder once per council run. Paid has no reminder. In Claude Code the shell foreground limit is 600 s: if timeout + 60 > 540 s, use `run_in_background: true` and resume on the completion notification; never poll or sleep. Otherwise set foreground tool timeout to `(timeout + 60) * 1000` ms. The script enforces the socket timeout. Do not wrap long calls in the common helper's default 600 s limit.
+Capture this stderr and show the reminder once per council run. Paid has no reminder. In Claude Code the shell foreground limit is 600 s: if timeout + 120 > 540 s, use `run_in_background: true` and resume on the completion notification; never poll or sleep. Otherwise set foreground tool timeout to `(timeout + 120) * 1000` ms. The script enforces the socket timeout. The runner uses the API timeout plus 120 seconds as its outer hard limit; include that allowance in the shell tool budget.
 
 ## Failures and bounded fallback
 
@@ -56,17 +55,15 @@ Capture this stderr and show the reminder once per council run. Paid has no remi
 | `other`: other 400 or unclassified failure | Log and use next transport |
 | `config`: disabled, missing ack/key, bad key/perms, usage/IO | `api-refused: <reason>`; next transport |
 
-Log each step in `failures.md` with `api-<class>`. At most `max_model_steps` step-downs (default 2), same family and line only. Pins never downgrade. Two dispatches per (seat, transport, model), total API generation calls per seat <= `2 * (1 + max_model_steps)` (including chunks/retries); exhausting this budget advances to the next transport.
+The runner logs each failed step in `failures.md` with `api-<class>` (configuration refusals use `api-refused`); do not duplicate it. At most `max_model_steps` step-downs (default 2), same family and line only. Pins never downgrade. Two dispatches per (seat, transport, model), total API generation calls per seat <= `2 * (1 + max_model_steps)` (including chunks/retries); exhausting this budget advances to the next transport.
 
 ## Rewrite chunks
 
-```powershell
-$text = [IO.File]::ReadAllText("$run\rewrite\chunk-$i-prompt.md")
-$tail = "`n`nDo not use any tools or read any files. Output only the rewritten chunk followed by the final REWRITE_END line."
-$prompt = "$run\rewrite\chunk-$i-api-prompt.md"
-[IO.File]::WriteAllText($prompt, $text + $tail, [Text.UTF8Encoding]::new($false))
-python -I "$shared\scripts\council_gemini_api.py" call --root $shared --model $slug --kind rewrite --prompt-file $prompt --out "$run\rewrite\chunk-$i-reply.txt"
+```text
+python -I <shared>/scripts/council_seat.py run --transport api --root <shared> --run <run> --seat <n> --label <label> --model <slug> --prompt-file <run>/rewrite/chunk-<i>-prompt.md --reply <run>/rewrite/chunk-<i>-reply.txt --kind rewrite --stem rewrite/chunk-<i>
 ```
+
+The runner writes the chunk plus rewrite tail to `<run>/rewrite/chunk-<i>-api-prompt.md` and delegates with `--kind rewrite`. Do not append the tail yourself.
 
 Run the existing chunk checker. Once chunk 1 succeeds, hold transport and model fixed. A later seat-level failure or exhausted budget restarts with `prepare` on the next transport/model, so no run mixes voices. Try remaining transports before the next rewriter seat. A failed chunk validation follows the rewrite checker's retry/fallback rules; it is not a reason to change the model.
 

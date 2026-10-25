@@ -330,14 +330,19 @@ class API(unittest.TestCase):
         import subprocess
         import sys
         script = Path(cga.__file__).resolve()
-        result = subprocess.run([sys.executable, '-I', str(script), 'config'], capture_output=True, text=True)
+        # Hermetic: only the shipped config.yaml, never a developer's config.local.yaml or key.
+        shipped = self.root / 'shipped'
+        shipped.mkdir()
+        (shipped / 'config.yaml').write_bytes((script.parent.parent / 'config.yaml').read_bytes())
+        result = subprocess.run([sys.executable, '-I', str(script), 'config', '--root', str(shipped)],
+                                capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         config = json.loads(result.stdout)
         self.assertEqual(config['gemini_transport'], ['agy', 'cursor'])
         self.assertFalse(config['gemini_api']['enabled'])
         self.assertEqual(config['gemini_api']['timeout_sec'], 1200)
-        result = subprocess.run([sys.executable, '-I', str(script), 'call', '--model', 'gemini-3.8-flash',
-                                 '--prompt-file', str(self.root / 'prompt.md'), '--out', str(self.root / 'reply.md')],
+        result = subprocess.run([sys.executable, '-I', str(script), 'call', '--root', str(shipped),
+                                 '--model', 'gemini-3.8-flash', '--prompt-file', str(self.root / 'prompt.md'), '--out', str(self.root / 'reply.md')],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertEqual(json.loads(result.stdout)['status'], 'refused')

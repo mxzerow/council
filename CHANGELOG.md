@@ -13,6 +13,12 @@ PR (not backfilled later). One entry per PR, dated by merge date, using
 `Added` / `Changed` / `Fixed` / `Removed` sections as needed. Skip trivial
 wording fixes that don't change behavior.
 
+## 2026-10-24 — Cursor routes Gemini through the shell
+
+### Changed
+
+- In Cursor, Gemini seats no longer use the Task tool. They walk `gemini_transport` through the shell exactly like Claude Code (`agy`, the API helper, `cursor-agent`); Task stays for the other families. Consequences: Gemini Flash is available in Cursor again (via `agy` or the API), `agy` is no longer silently skipped, and a Cursor cloud agent (which has no `agy` or `cursor-agent`) relies on the API helper and skips Gemini seats if it is off. `core.md`, `SKILL.md` and the README were updated to match; nothing changes for Claude Code.
+
 ## 2026-10-24 — Gemini API transport (opt-in)
 
 ### Added

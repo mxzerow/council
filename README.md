@@ -21,13 +21,13 @@ There is no parallel first-answers pass and no chairman synthesis. See [`core.md
 | `gpt` seats | [Codex CLI](https://github.com/openai/codex) (`codex login`). ChatGPT login uses ChatGPT/Codex quota |
 | `grok` seats | The Grok CLI (`agent` on PATH) |
 | Fallback for `gemini` seats | Cursor's CLI (`cursor-agent login`): used when `agy` is out of quota; spends Cursor usage |
-| Cursor | Task by default; Gemini can use the API Python helper. The vendor CLIs above are not needed there |
+| Cursor | Task for non-Gemini families. Gemini seats use the shell like Claude Code (`agy`, the API helper, `cursor-agent`), so those need to be installed on the same machine |
 
 Recipes for calling each CLI are written for PowerShell on Windows ([`recipes/`](recipes/)).
 
 ## Choosing how Gemini is called
 
-`gemini_transport` is an ordered fallback list, independent of `gemini_api.tier`. Default `[agy, cursor]` and `gemini_api.enabled: false` preserve existing behavior. Claude Code supports all three transports; Cursor silently skips `agy`, uses Task for `cursor`, and Shell for the API Python helper. A seat-level failure advances to the next configured transport, resolving the same family and line again.
+`gemini_transport` is an ordered fallback list, independent of `gemini_api.tier`. Default `[agy, cursor]` and `gemini_api.enabled: false` preserve existing behavior. Both Claude Code and Cursor call all three through the shell (Cursor no longer uses Task for Gemini). A seat-level failure advances to the next configured transport, resolving the same family and line again.
 
 | Route | Needs | Latency | Cost | Privacy | Quota |
 |---|---|---|---|---|---|
@@ -126,7 +126,7 @@ Cloud agents work on a fresh clone of a repository and do not see `~/.cursor/ski
 3. Start a cloud agent on that repository and run `/council`.
 4. To update later, run the same command again. A file you edited in the copy (for example `config.yaml`) is reported and left alone; add `--force` to overwrite it. `python -I .../council_install.py check --target ...` shows drift without changing anything.
 
-On a cloud machine the skill runs on Linux: paths use `/`, the scripts run as `python3` if `python` is missing, and run data goes to `~/.council/runs` on that machine and is discarded with it. Seats use Task or the opt-in API helper (key via `COUNCIL_GEMINI_API_KEY` secret); vendor CLI recipes (`agy`, `codex`) are not used there. Not yet tested on a real cloud agent; the installed copy was checked to be discovered by a local `cursor-agent`.
+On a cloud machine the skill runs on Linux: paths use `/`, the scripts run as `python3` if `python` is missing, and run data goes to `~/.council/runs` on that machine and is discarded with it. A cloud agent has no `agy` or `cursor-agent`, so its Gemini seats rely on the API helper (key via `COUNCIL_GEMINI_API_KEY` secret) and are skipped if that is off; other families use Task. Not yet tested on a real cloud agent; the installed copy was checked to be discovered by a local `cursor-agent`.
 
 ## Use
 
